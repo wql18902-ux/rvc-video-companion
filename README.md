@@ -15,7 +15,13 @@
 
 ## 截图
 
-> 浮窗播放器嵌入 aim-read.top 阅读页右侧
+**浮动播放器 + 键盘快捷键面板**
+
+![浮动播放器与键盘控制面板](screenshots/player-with-keyboard-panel.png)
+
+**与阅读站单词查询共存** — 点单词弹出释义，直接覆盖在视频上方，互不干扰
+
+![单词查询弹窗覆盖在视频播放器上方](screenshots/word-lookup-over-video.png)
 
 ## 技术栈
 
