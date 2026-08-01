@@ -23,34 +23,22 @@
 
 ![单词查询弹窗覆盖在视频播放器上方](screenshots/word-lookup-over-video.png)
 
-## 技术栈
-
-- **Chrome 扩展（MV3）**：Vanilla JS，无构建工具链
-- **本地服务器**：Python 3 aiohttp + ffmpeg/ffprobe
-- **流式播放**：mpegts.js（浏览器端 MPEG-TS 解码）
-- **打包分发**：PyInstaller 打包 .app（含 ffmpeg 二进制，用户无需装 Python/ffmpeg）
-
 ## 快速开始
 
-### 方式一：一行命令安装（推荐，零拦截）
+> 本文面向**终端用户**。开发者/维护者请看 [README-内部版.md](README-内部版.md)。
 
-打开「终端」app（Spotlight 搜 Terminal），粘贴下面这行命令后回车：
+### 方式一：手动下载（推荐）
 
-**打包版**（无需装 Python/ffmpeg，适合所有人）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/main/packaging/install.sh | bash
-```
-
-**源代码版**（需要 Homebrew，适合开发者）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/main/packaging/install-source.sh | bash
-```
-
-> 为什么用 curl？macOS 只对浏览器下载的文件打「隔离标记」，curl 下载的文件不会被 Gatekeeper 拦截，双击即用。
-
-安装完成后按提示加载 Chrome 扩展即可使用。
+1. 到 [Releases](../../releases) 下载 `RVC-Video-Companion.zip`
+2. 解压
+3. 打开「终端」app（Spotlight 搜 Terminal），执行：
+   ```bash
+   xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
+   ```
+   （路径根据你实际解压位置调整。这一步清除 macOS 隔离标记，只需做一次）
+4. 双击「RVC视频伴侣.app」启动服务器
+5. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选解压出的 `reader-video-companion` 文件夹
+6. 访问 [aim-read.top](https://aim-read.top)，点扩展图标唤出播放器
 
 ### 方式二：让 AI Agent 帮你装
 
@@ -68,14 +56,27 @@ curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/mai
 任何一步失败就停下来告诉我具体错误。
 ```
 
-### 方式三：手动下载（传统方式）
+### 方式三：一行命令安装（开发者/海外网络可选）
 
-1. 到 [Releases](../../releases) 下载 `RVC-Video-Companion.zip`
-2. 解压
-3. 终端执行 `xattr -cr RVC视频伴侣.app`（移除隔离标记，否则报「已损坏」）
-4. 双击「RVC视频伴侣.app」启动服务器
-5. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选解压出的 `reader-video-companion` 文件夹
-6. 访问 [aim-read.top](https://aim-read.top)，点扩展图标唤出播放器
+> curl 下载走 GitHub，国内网络可能较慢或超时。国内用户推荐方式一。
+
+打开「终端」app，粘贴下面这行命令后回车：
+
+**打包版**（无需装 Python/ffmpeg，适合所有人）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/main/packaging/install.sh | bash
+```
+
+**源代码版**（需要 Homebrew，适合开发者）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/main/packaging/install-source.sh | bash
+```
+
+> 为什么用 curl？macOS 只对浏览器下载的文件打「隔离标记」，curl 下载的文件不会被 Gatekeeper 拦截，双击即用。
+
+安装完成后按提示加载 Chrome 扩展即可使用。
 
 ### 方式四：从源码运行（开发者）
 
@@ -101,28 +102,6 @@ env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 > 选目录用的是 `osascript choose folder`（Standard Additions），**不需要自动化权限**。
 > 每次更新 .app 后，输入监控权限会失效（系统按签名记账），需重新勾选。
 
-## 目录结构
-
-```
-.
-├── reader-video-companion/   # Chrome 扩展（唯一维护的扩展）
-│   ├── content.js            # 内容脚本（播放器主体逻辑）
-│   ├── player.css            # 播放器样式
-│   ├── background.js         # 后台脚本（消息中转）
-│   ├── manifest.json         # MV3 清单
-│   └── mpegts.min.js         # MPEG-TS 解码库
-├── stream-server/            # 本地转码服务器
-│   ├── server.py             # aiohttp 服务器（含 SSE 热键通道）
-│   └── start.sh              # 启动脚本
-├── tests/                    # 验收脚本
-│   ├── acceptance.py         # 端到端验收（sha256 冻结）
-│   └── fixtures/             # 测试样本
-├── test.html                 # 验收测试页（sha256 冻结）
-└── packaging/                # 打包脚本
-    ├── make-distro.sh        # 生成分发包 zip
-    └── build.sh              # PyInstaller 打包 .app
-```
-
 ## 支持的视频格式
 
 | 格式 | 处理方式 |
@@ -138,6 +117,46 @@ env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 
 - macOS 12+
 - Chrome / Edge / 其他 Chromium 浏览器
+
+## 开发者参考
+
+### 技术栈
+
+- **Chrome 扩展（MV3）**：Vanilla JS，无构建工具链
+- **本地服务器**：Python 3 aiohttp + ffmpeg/ffprobe
+- **流式播放**：mpegts.js（浏览器端 MPEG-TS 解码）
+- **打包分发**：PyInstaller 打包 .app（含 ffmpeg 二进制，用户无需装 Python/ffmpeg）
+
+### 目录结构
+
+```
+.
+├── reader-video-companion/   # Chrome 扩展（唯一维护的扩展）
+│   ├── content.js            # 内容脚本（播放器主体逻辑）
+│   ├── player.css            # 播放器样式
+│   ├── background.js         # 后台脚本（消息中转）
+│   ├── manifest.json         # MV3 清单（版本号唯一源）
+│   └── mpegts.min.js         # MPEG-TS 解码库
+├── stream-server/            # 本地转码服务器
+│   ├── server.py             # aiohttp 服务器（含 SSE 热键通道）
+│   ├── start.sh              # 启动脚本
+│   └── packaging/            # .app 打包脚本
+│       └── build.sh          # PyInstaller 打包 .app
+├── packaging/                # 分发包打包脚本
+│   ├── make-distro.sh        # 生成分发包 zip
+│   ├── install.sh            # 一键安装（打包版）
+│   └── install-source.sh     # 一键安装（源码版）
+├── tests/                    # 测试脚本
+│   ├── acceptance.py         # 端到端验收（sha256 冻结）
+│   ├── test_server_api.py    # L1 单测（29 用例）
+│   ├── e2e_extra.py          # L2 真实进程 E2E（5 用例）
+│   └── fixtures/             # 测试样本
+├── scripts/                  # 检查脚本
+│   ├── check.sh              # 统一检查（静态 + 验收）
+│   └── install-hooks.sh      # git hooks 安装
+├── run_tests.sh              # 分层测试入口（L0→L1→L2→汇总）
+└── test.html                 # 验收测试页（sha256 冻结）
+```
 
 ## License
 

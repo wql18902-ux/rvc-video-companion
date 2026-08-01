@@ -37,7 +37,8 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 aiohttp 服务器 / ffmpeg+ffprobe /
 - `reader-video-companion/` — 唯一维护的扩展（content.js/player.css/background.js/manifest.json）
 - `stream-server/` — 本地服务器（server.py/start.sh）
 - `tests/` — 分层测试：验收脚本 acceptance.py + fixtures/ + L1 单测 test_server_api.py + L2 真实进程 e2e_extra.py；**根目录 `test.html`** — 验收测试页；三者 **sha256 冻结，不许改**（注意 test.html 在根目录，不在 tests/ 内）。哈希冻结范围只覆盖判卷基准三文件（acceptance.py/test.html/sample.mp4），content.js/player.css/server.py 等实现文件不受哈希约束，由 run_tests.sh 分层行为验证覆盖
-- `packaging/` — 打包脚本（make-distro.sh / build-crx.sh）
+- `packaging/` — 分发包打包脚本（make-distro.sh 打 zip / install.sh 一键安装 / install-source.sh 源码版 / build-crx.sh [已弃用]）
+- `stream-server/packaging/` — .app 构建脚本（build.sh，PyInstaller 打包 + 分步签名；版本号自动从 manifest.json 注入）
 - `PROGRESS.md` 现役状态真相源；`BLOCKED.md` 待决项；`iterations/history.md` 版本记录
 
 ## 硬约束
@@ -57,9 +58,9 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 aiohttp 服务器 / ffmpeg+ffprobe /
 
 v3.2.2（2026-08-01 发布，GitHub Release v3.2.2 + commit dea5ef6）。播放列表已回退。
 - **核心配置**：player.css 用 `position: sticky + float:right`（fixed 已回滚，违反硬约束）；server.py pick-folder 用 `activate me`（纯 Standard Additions，无自动化权限）；server.py 编码器 `libx264 -preset fast -crf 23`（h264_videotoolbox 已回滚）；content.js keys-panel 已恢复（state.keybindings + chrome.storage.local）
-- **v3.2.2 改动**：fixed→sticky 回滚修复挤压正文 / System Events→activate me 修复 -1743 权限错误 / 恢复 keys-panel / README 加「方式零：让 AI Agent 帮你装」+ 功能截图 / zip 含「首次打开-点我.command」+ 重写安装说明.txt（解决 macOS quarantine「已损坏」UX 问题）
-- **打包版**：.app 与 zip（Aug 1 18:58 重建，含 .command 脚本）是最新版。Release asset 名 `RVC-Video-Companion.zip`（GitHub 不支持中文 asset 名）。Release: https://github.com/wql18902-ux/rvc-video-companion/releases/tag/v3.2.2
-- **已知待修**：zip 解压后 .command 文件可能丢失执行权限（`permission denied`），需在打包流程中验证 ditto 权限保留或安装说明补充 `chmod +x` 提示
+- **v3.2.2 改动**：fixed→sticky 回滚修复挤压正文 / System Events→NSOpenPanel(setActivationPolicy_ 前置) / 恢复 keys-panel / README 加「方式二：让 AI Agent 帮你装」+ 功能截图 / 安装说明.txt 重写（解决 macOS quarantine「已损坏」UX 问题）
+- **v3.2.2 后续整顿（本次）**：热键 IME 脏值修复（捕获加 isComposing 过滤+单 ASCII 校验，兜底改合法性校验）/ 品牌统一 RVC 视频伴侣 / 版本单一源 ADR-001（manifest.json 为唯一源，build/make-distro 自动注入）/ 删 .command 鸡生蛋（清隔离统一终端一行 xattr）/ install.sh 多源 fallback+ditto 解压+轮询探活 / README 重排（手动下载提方式一，curl 降可选）/ check.sh 加版本号一致性校验
+- **打包版**：dist 的 .app/zip 仍是 18:58 旧版（含已删除的 .command），**需重建**（跑 build.sh + make-distro.sh）才含本次整顿。Release asset 名 `RVC-Video-Companion.zip`（GitHub 不支持中文 asset 名）。Release: https://github.com/wql18902-ux/rvc-video-companion/releases/tag/v3.2.2
 - **历史根因（保留备查）**：pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL。已拆 `--hotkey-child` 子进程隔离。每次重打包 .app 后输入监控权限失效（adhoc 签名按二进制哈希记账），需重新授权
 - 运行态：双击 .app **无终端窗口**（后台运行），重复双击无副作用（端口检测后退出）；停止 `lsof -ti:8765 | xargs kill`
 - git push 受全局 7890 代理影响，代理未开时用 `git -c http.proxy= -c https.proxy= push origin main` 临时绕过
