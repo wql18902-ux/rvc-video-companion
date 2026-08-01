@@ -42,7 +42,13 @@ MAX_SSE_CLIENTS = 10
 
 # 转码日志目录：每次 ffmpeg 请求的 stderr 落盘为 transcode-<req_id>.log
 # （req_id 由播放端生成：时间戳+随机，天然按时间与请求关联，便于排查）
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+# 打包版（frozen）下 __file__ 指向 .app 解包目录（Contents/Frameworks），若写日志到
+# 该处会破坏签名密封（codesign --verify --deep --strict 报 sealed resource 缺失），
+# 故 frozen 模式改写到用户日志目录；源码版保持 stream-server/logs/ 便于本地排查。
+if getattr(sys, 'frozen', False):
+    LOG_DIR = os.path.expanduser('~/Library/Logs/RVC视频伴侣')
+else:
+    LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 
 # 结构化转码错误码 -> 用户可读提示（播放端 /api/stream-error 透传）
 TRANSCODE_ERROR_MSGS = {
@@ -51,7 +57,7 @@ TRANSCODE_ERROR_MSGS = {
     'INVALID_DATA': '视频文件已损坏或不是有效的媒体文件',
     'UNSUPPORTED_CODEC': '视频/音频编码不受支持，无法转码',
     'FILE_READ_ERROR': '无法读取视频文件，请检查文件是否存在且有读取权限',
-    'TRANSCODE_FAILED': '转码失败，请查看服务器日志（stream-server/logs/）',
+    'TRANSCODE_FAILED': '转码失败，请查看服务器日志（服务器日志目录）',
     'STREAM_ABORTED': '播放已停止或已切换',
 }
 
@@ -84,9 +90,14 @@ def read_app_version():
     """读取版本号唯一源 reader-video-companion/manifest.json（ADR-001）；失败返回 unknown"""
     try:
         if getattr(sys, 'frozen', False):
-            base = os.path.dirname(os.path.abspath(sys.executable))
+            base = os.path.dirname(os.path.abspath(sys.executable))  # Contents/MacOS
             candidates = [
+                # 打包内置布局：manifest.json 由 build.sh 拷入 Contents/Resources/reader-video-companion/
                 os.path.join(base, '..', 'Resources', 'reader-video-companion', 'manifest.json'),
+                # 发行目录布局：发行目录/RVC视频伴侣.app + 发行目录/reader-video-companion/
+                # base=Contents/MacOS，需上溯 3 级（MacOS -> Contents -> .app -> 发行目录）
+                os.path.join(base, '..', '..', '..', 'reader-video-companion', 'manifest.json'),
+                # 兼容历史 Resources 布局（未来版本可能改回）
                 os.path.join(base, '..', '..', 'reader-video-companion', 'manifest.json'),
             ]
         else:

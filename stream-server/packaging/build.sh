@@ -146,6 +146,12 @@ for f in player.html mpegts.min.js base_library.zip; do
     echo "    数据文件移至 Resources：${f}（Frameworks 留软链）"
   fi
 done
+# manifest.json 拷入 Resources（ADR-001 版本号唯一源）：server.py read_app_version()
+# 打包版优先从 Contents/Resources/reader-video-companion/manifest.json 读取版本号，
+# 不拷入则打包版启动时版本显示 unknown（vunknown）
+mkdir -p "$APP/Contents/Resources/reader-video-companion"
+cp "$PROJECT_ROOT/reader-video-companion/manifest.json" "$APP/Contents/Resources/reader-video-companion/manifest.json"
+echo "    manifest.json 拷入 Resources/reader-video-companion/"
 # python3.14 补 framework 结构：codesign 把 Frameworks/ 下任何目录都当 framework
 # 子包处理，python3.14 光秃秃（无 Versions/Info.plist）→ "bundle format unrecognized"
 # 补 Versions/3.14/Resources/Info.plist + 顶层 symlink，**lib-dynload 留原位**（保 @loader_path
