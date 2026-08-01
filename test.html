@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Reader 测试页 - 模拟剧本页面</title>
+<style>
+  body {
+    background: #1a1a1a;
+    color: #ddd;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px;
+    line-height: 1.8;
+  }
+  h1 { color: #fff; }
+  .script-line {
+    margin: 12px 0;
+    padding: 8px 0;
+    border-bottom: 1px solid #333;
+  }
+  .character { color: #4a9eff; font-weight: 600; }
+  .word:hover {
+    background: rgba(74, 158, 255, 0.2);
+    cursor: pointer;
+    border-radius: 3px;
+  }
+</style>
+<link rel="stylesheet" href="reader-video-companion/player.css">
+</head>
+<body>
+  <h1>S01E01 The One Where Monica Gets a New Roommate</h1>
+  <p style="color:#888;font-size:13px;">Written by Marta Kauffman & David Crane / Directed by James Burrows</p>
+
+  <div class="script-line">
+    <span class="character">Monica:</span> <span class="word">There's</span> <span class="word">nothing</span> <span class="word">to</span> <span class="word">tell!</span> <span class="word">He's</span> <span class="word">just</span> <span class="word">some</span> <span class="word">guy</span> <span class="word">I</span> <span class="word">work</span> <span class="word">with!</span>
+  </div>
+  <div class="script-line">
+    <span class="character">Joey:</span> <span class="word">Come</span> <span class="word">on,</span> <span class="word">you're</span> <span class="word">going</span> <span class="word">out</span> <span class="word">with</span> <span class="word">the</span> <span class="word">guy!</span>
+  </div>
+  <div class="script-line">
+    <span class="character">Chandler:</span> <span class="word">All</span> <span class="word">right</span> <span class="word">Joey,</span> <span class="word">be</span> <span class="word">nice.</span>
+  </div>
+  <div class="script-line">
+    <span class="character">Phoebe:</span> <span class="word">Wait,</span> <span class="word">does</span> <span class="word">he</span> <span class="word">eat</span> <span class="word">chalk?</span>
+  </div>
+
+  <p style="margin-top:40px;color:#666;">（点击下方单词模拟查词弹窗）</p>
+
+  <script>
+    // 模拟点击单词弹出查词窗口
+    document.querySelectorAll('.word').forEach(word => {
+      word.addEventListener('click', (e) => {
+        // 移除已有的弹窗
+        document.querySelectorAll('.dict-popup').forEach(p => p.remove());
+
+        const popup = document.createElement('div');
+        popup.className = 'dict-popup';
+        popup.style.cssText = 'position:fixed;top:' + (e.clientY + 10) + 'px;left:' + e.clientX + 'px;background:#2a2a2a;color:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.5);z-index:200;font-size:13px;max-width:240px;';
+        popup.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">' + word.textContent.replace(/[^a-zA-Z]/g, '') + '</div><div style="color:#999;font-size:12px;">这是一个测试查词弹窗，应该浮在播放器上方。</div>';
+        document.body.appendChild(popup);
+
+        // 点击其他地方关闭
+        setTimeout(() => {
+          document.addEventListener('click', function closePopup(ev) {
+            if (!popup.contains(ev.target)) {
+              popup.remove();
+              document.removeEventListener('click', closePopup);
+            }
+          });
+        }, 100);
+      });
+    });
+  </script>
+</body>
+</html>

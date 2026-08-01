@@ -1,0 +1,39 @@
+# 系统文件
+.DS_Store
+__pycache__/
+*.pyc
+
+# IDE / AI 工具配置
+.claude/
+.qoderignore
+.trae/
+.workbuddy/
+.playwright-mcp/
+
+# 测试 / 对话记录
+conversations/
+docs/
+
+# 内部素材 / 任务文档
+素材/
+任务书-*.md
+
+# Chrome 扩展签名私钥（绝不上传）
+packaging/rvc-key.pem
+packaging/*.crx
+
+# 日志
+*.log
+
+# 打包产物（.app / zip 走 GitHub Release，不进 git）
+stream-server/packaging/build/
+stream-server/packaging/.venv/
+stream-server/packaging/dist/
+packaging/dist/
+
+# Worktrees
+.worktrees/
+node_modules/
+
+# 旧 git 历史备份（重建历史时生成）
+.git.old/

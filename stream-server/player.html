@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RVC 流式播放器</title>
+<script src="/mpegts.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a1a;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 侧边栏 */
+.sidebar {
+  width: 300px;
+  background: #252525;
+  border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.sidebar-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #333;
+}
+.sidebar-header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.dir-input {
+  display: flex;
+  gap: 6px;
+}
+.dir-input input {
+  flex: 1;
+  padding: 6px 10px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+}
+.dir-input input:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+.dir-input button {
+  padding: 6px 12px;
+  background: #4a9eff;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dir-input button:hover { background: #3a8eef; }
+
+.file-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.file-item:hover { background: #333; }
+.file-item.active { background: #4a9eff; }
+.file-icon {
+  margin-right: 10px;
+  font-size: 18px;
+}
+.file-info {
+  flex: 1;
+  min-width: 0;
+}
+.file-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-meta {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+.file-item.active .file-meta { color: #cce4ff; }
+
+/* 主播放区 */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.video-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  position: relative;
+  min-height: 0;
+}
+video {
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.placeholder {
+  text-align: center;
+  color: #666;
+}
+.placeholder h2 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.placeholder p {
+  font-size: 13px;
+  color: #888;
+}
+
+/* 底部状态条 */
+.statusbar {
+  padding: 8px 16px;
+  background: #252525;
+  border-top: 1px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: #999;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #666;
+}
+.status-dot.playing { background: #4a9eff; }
+.status-dot.transcoding { background: #ffa500; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+/* loading */
+.loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.8);
+  padding: 20px 32px;
+  border-radius: 10px;
+  text-align: center;
+  z-index: 10;
+}
+.loading-overlay .spinner {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+.loading-overlay p {
+  font-size: 13px;
+  color: #ccc;
+}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>🎬 RVC 流式播放器</h1>
+    <div class="dir-input">
+      <input type="text" id="dirInput" placeholder="视频目录路径" value="">
+      <button onclick="loadFiles()">刷新</button>
+    </div>
+  </div>
+  <div class="file-list" id="fileList">
+    <div style="padding:16px;color:#666;font-size:13px;text-align:center;">输入目录后点刷新</div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="video-container">
+    <video id="video" controls></video>
+    <div class="placeholder" id="placeholder">
+      <h2>👈 从左侧选择视频</h2>
+      <p>MKV/MOV 会自动实时转码，几秒后开始播放</p>
+    </div>
+    <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+      <div class="spinner">⏳</div>
+      <p id="loadingText">正在转码...</p>
+    </div>
+  </div>
+  <div class="statusbar">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">就绪</span>
+    <span style="margin-left:auto;color:#666;">S=暂停/播放 · A=后退1秒 · D=前进1秒</span>
+  </div>
+</div>
+
+<script>
+const video = document.getElementById('video');
+const placeholder = document.getElementById('placeholder');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingText = document.getElementById('loadingText');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const dirInput = document.getElementById('dirInput');
+const fileList = document.getElementById('fileList');
+
+let player = null;
+let currentFile = null;
+
+// 默认目录
+dirInput.value = '~/Downloads';
+
+// 加载文件列表
+async function loadFiles() {
+  const dir = dirInput.value.trim();
+  if (!dir) return;
+  fileList.innerHTML = '<div style="padding:16px;color:#666;font-size:13px;text-align:center;">加载中...</div>';
+  try {
+    const res = await fetch('/api/files?dir=' + encodeURIComponent(dir));
+    const data = await res.json();
+    if (data.error) {
+      fileList.innerHTML = `<div style="padding:16px;color:#ff6b6b;font-size:13px;">${data.error}</div>`;
+      return;
+    }
+    if (!data.files || data.files.length === 0) {
+      fileList.innerHTML = '<div style="padding:16px;color:#666;font-size:13px;">该目录没有视频文件</div>';
+      return;
+    }
+    dirInput.value = data.dir; // 更新为展开后的路径
+    fileList.innerHTML = '';
+    data.files.forEach(f => {
+      const item = document.createElement('div');
+      item.className = 'file-item';
+      const sizeMB = (f.size / 1024 / 1024).toFixed(1);
+      item.innerHTML = `
+        <span class="file-icon">${f.ext === '.mp4' ? '🎬' : '📦'}</span>
+        <div class="file-info">
+          <div class="file-name">${f.name}</div>
+          <div class="file-meta">${f.ext.toUpperCase()} · ${sizeMB} MB</div>
+        </div>
+      `;
+      item.onclick = () => playFile(f.name, item);
+      fileList.appendChild(item);
+    });
+  } catch (e) {
+    fileList.innerHTML = `<div style="padding:16px;color:#ff6b6b;font-size:13px;">请求失败: ${e.message}</div>`;
+  }
+}
+
+// 系统媒体键（⏮ ⏯ ⏭）全局控制
+// Chrome Media Session：焦点在别的窗口（如 Reader）时，硬件媒体键依然生效
+function setupMediaSession(filename) {
+  if (!('mediaSession' in navigator)) return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: filename,
+      artist: 'RVC 流式播放器'
+    });
+    navigator.mediaSession.setActionHandler('play', () => { video.play(); });
+    navigator.mediaSession.setActionHandler('pause', () => { video.pause(); });
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+      video.currentTime = Math.max(0, video.currentTime - 1);
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+      video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 1);
+    });
+  } catch (e) {}
+}
+
+// 播放文件
+async function playFile(filename, item) {
+  // 高亮选中
+  document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+  item.classList.add('active');
+
+  currentFile = filename;
+  placeholder.style.display = 'none';
+  loadingOverlay.style.display = 'block';
+  setStatus('transcoding', '加载中: ' + filename);
+
+  // 停止旧播放器
+  if (player) {
+    player.destroy();
+    player = null;
+  }
+  video.src = '';
+
+  // 注册系统媒体键控制
+  setupMediaSession(filename);
+
+  const dir = encodeURIComponent(dirInput.value.trim());
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+
+  // MP4/M4V/WebM：原生直读，进度条/seek/倍速全部正常
+  if (['mp4', 'm4v', 'webm'].includes(ext)) {
+    loadingText.textContent = '正在加载...';
+    video.src = '/api/file?file=' + encodeURIComponent(filename) + '&dir=' + dir;
+
+    const onPlaying = () => {
+      loadingOverlay.style.display = 'none';
+      setStatus('playing', '播放中: ' + filename);
+      video.removeEventListener('playing', onPlaying);
+    };
+    video.addEventListener('playing', onPlaying);
+
+    video.play().catch(() => {
+      loadingText.textContent = '点击视频播放';
+    });
+    return;
+  }
+
+  // MKV/MOV/AVI/FLV：ffmpeg 实时转码 + mpegts.js
+  loadingText.textContent = '正在启动转码...';
+
+  // 获取时长（用于显示）
+  try {
+    const durRes = await fetch('/api/duration?file=' + encodeURIComponent(filename) + '&dir=' + dir);
+    const durData = await durRes.json();
+    if (durData.duration) {
+      video.setAttribute('data-duration', durData.duration);
+    }
+  } catch (e) {}
+
+  const streamUrl = '/api/stream?file=' + encodeURIComponent(filename) + '&dir=' + dir;
+
+  if (mpegts.isSupported()) {
+    player = mpegts.createPlayer({
+      type: 'mpegts',
+      url: streamUrl,
+      isLive: false,
+      lazyLoad: false
+    }, {
+      enableStashBuffer: true,
+      stashInitialSize: 128 * 1024,  // 初始缓冲 128KB 后开始播放
+    });
+
+    player.on(mpegts.Events.ERROR, (errType, errDetail) => {
+      loadingOverlay.style.display = 'none';
+      setStatus('', '错误: ' + errDetail);
+      console.error('mpegts error:', errType, errDetail);
+    });
+
+    player.attachMediaElement(video);
+    player.load();
+
+    // 用 video 元素的事件检测播放开始（比 mpegts player 事件更可靠）
+    const onPlaying = () => {
+      loadingOverlay.style.display = 'none';
+      setStatus('playing', '播放中: ' + filename);
+      video.removeEventListener('playing', onPlaying);
+    };
+    video.addEventListener('playing', onPlaying);
+
+    video.play().catch(() => {
+      loadingText.textContent = '点击视频播放';
+    });
+  } else {
+    setStatus('', '浏览器不支持 mpegts.js');
+  }
+}
+
+function setStatus(state, text) {
+  statusDot.className = 'status-dot' + (state ? ' ' + state : '');
+  statusText.textContent = text;
+}
+
+// 键盘快捷键
+// 本地处理时间戳：页面有焦点时同一按键会被「本地 keydown」和「pynput SSE」
+// 两个通道先后捕获，用时间戳去重，避免一次按键seek两秒/暂停又播放
+const lastLocalKeyAt = { toggle_play: 0, back: 0, forward: 0 };
+const SSE_DEDUPE_MS = 400;
+
+document.addEventListener('keydown', (e) => {
+  const tag = e.target.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  switch (e.key) {
+    case 's':
+    case 'S':
+      e.preventDefault();
+      if (video.src || player) {
+        lastLocalKeyAt.toggle_play = Date.now();
+        if (video.paused) video.play();
+        else video.pause();
+      }
+      break;
+    case 'a':
+    case 'A':
+      e.preventDefault();
+      lastLocalKeyAt.back = Date.now();
+      video.currentTime = Math.max(0, video.currentTime - 1);
+      break;
+    case 'd':
+    case 'D':
+      e.preventDefault();
+      lastLocalKeyAt.forward = Date.now();
+      video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 1);
+      break;
+  }
+});
+
+// ========== SSE 全局热键通道 ==========
+// 服务器后台用 pynput 监听 A/D/S，通过 SSE 广播给所有播放器页面
+// 这样焦点在 Reader 窗口时也能控制视频
+(function connectControlSSE() {
+  const evtSource = new EventSource('/api/control');
+  evtSource.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (!msg.action) return;
+      // 同一按键刚被本地 keydown 处理过（页面有焦点时本地通道更快），跳过
+      if (Date.now() - (lastLocalKeyAt[msg.action] || 0) < SSE_DEDUPE_MS) return;
+      switch (msg.action) {
+        case 'toggle_play':
+          if (video.paused) video.play();
+          else video.pause();
+          break;
+        case 'back':
+          video.currentTime = Math.max(0, video.currentTime - 1);
+          break;
+        case 'forward':
+          video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 1);
+          break;
+      }
+    } catch (err) {}
+  };
+  evtSource.onerror = () => {
+    // 断线后 3 秒重连
+    setTimeout(connectControlSSE, 3000);
+  };
+})();
+
+// 页面加载时自动加载默认目录
+loadFiles();
+</script>
+
+</body>
+</html>

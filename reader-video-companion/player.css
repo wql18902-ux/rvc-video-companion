@@ -1,0 +1,810 @@
+/* ========== 嵌入式播放器容器 ========== */
+.rvc-player {
+  position: sticky;
+  top: 10px;
+  float: right;
+  width: 420px;
+  min-width: 240px;
+  min-height: 160px;
+  margin: 0 0 16px 20px;
+  z-index: 1;
+  background: rgba(24, 24, 26, 0.82);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  border-radius: 14px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #fff;
+  user-select: none;
+}
+
+/* 空载紧凑：未加载视频时只显示标题栏（含全部按钮），视频区/控制条/缩放把手收起，总高 ≤80px */
+.rvc-player.rvc-empty {
+  min-height: 0;
+  height: auto;
+}
+.rvc-player.rvc-empty .rvc-body,
+.rvc-player.rvc-empty .rvc-controls,
+.rvc-player.rvc-empty .rvc-resize-handle {
+  display: none !important;
+}
+
+/* ========== 无框模式 ========== */
+.rvc-player.rvc-frameless {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.rvc-player.rvc-frameless .rvc-header,
+.rvc-player.rvc-frameless .rvc-controls,
+.rvc-player.rvc-frameless .rvc-placeholder,
+.rvc-player.rvc-frameless .rvc-keys-panel {
+  display: none !important;
+}
+
+.rvc-player.rvc-frameless .rvc-body {
+  border-radius: 0;
+}
+
+/* 无框模式 hover 悬浮条（底部，含进度条/时间/前后退） */
+.rvc-frameless-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 20;
+}
+
+.rvc-player.rvc-frameless:hover .rvc-frameless-bar,
+.rvc-frameless-bar.rvc-fb-active {
+  opacity: 1;
+}
+
+.rvc-frameless-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.rvc-frameless-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+/* 无框悬浮条进度条 */
+.rvc-fb-progress {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: height 0.15s;
+}
+
+.rvc-fb-progress:hover {
+  height: 6px;
+}
+
+.rvc-fb-progress-bar {
+  height: 100%;
+  background: #0a84ff;
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.1s linear;
+}
+
+.rvc-fb-time {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 标题栏 */
+.rvc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(30, 30, 32, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: move;
+}
+
+.rvc-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #ddd;
+}
+
+.rvc-header-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.rvc-header-btn {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.rvc-header-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+/* 键盘接管开关：开启态高亮 */
+.rvc-header-btn.rvc-btn-active {
+  color: #0a84ff;
+  background: rgba(10, 132, 255, 0.18);
+}
+
+.rvc-header-btn.rvc-btn-active:hover {
+  background: rgba(10, 132, 255, 0.3);
+  color: #4db0ff;
+}
+
+/* 视频区域 */
+.rvc-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+}
+
+.rvc-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.rvc-placeholder {
+  color: #666;
+  font-size: 14px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* 加载视频按钮 */
+.rvc-load-btn {
+  padding: 10px 20px;
+  background: #0a84ff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+  box-shadow: 0 4px 16px rgba(10, 132, 255, 0.35);
+}
+
+.rvc-load-btn:hover {
+  background: #0071e3;
+  transform: translateY(-1px);
+}
+
+/* 控制条 */
+.rvc-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(30, 30, 32, 0.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+}
+
+/* 倍速按钮 */
+.rvc-btn-speed {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.rvc-btn-speed:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+/* 倍速面板（控制条上方弹出） */
+.rvc-speed-panel {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  right: 8px;
+  margin-bottom: 6px;
+  background: rgba(40, 40, 44, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px;
+  z-index: 30;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  min-width: 168px;
+}
+.rvc-speed-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.rvc-speed-option {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 12px;
+  cursor: pointer;
+}
+.rvc-speed-option:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.rvc-speed-option.rvc-active { background: #0a84ff; color: #fff; border-color: #0a84ff; }
+.rvc-speed-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rvc-speed-slider {
+  flex: 1;
+  cursor: pointer;
+}
+.rvc-speed-value {
+  font-size: 11px;
+  color: #999;
+  min-width: 36px;
+  text-align: right;
+}
+
+.rvc-control-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.rvc-control-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.rvc-progress {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: height 0.15s;
+}
+
+.rvc-progress:hover {
+  height: 7px;
+}
+
+.rvc-progress-bar {
+  height: 100%;
+  background: #0a84ff;
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.1s linear;
+  position: relative;
+}
+
+/* 进度条圆形把手（hover 显示） */
+.rvc-progress-bar::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rvc-progress:hover .rvc-progress-bar::after {
+  opacity: 1;
+}
+
+.rvc-time {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ========== 缩放把手（8方向） ========== */
+.rvc-resize-handle {
+  position: absolute;
+  z-index: 10;
+}
+
+/* 四角 */
+.rvc-resize-handle[data-dir="nw"] { top: 0; left: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.rvc-resize-handle[data-dir="ne"] { top: 0; right: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+.rvc-resize-handle[data-dir="sw"] { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+.rvc-resize-handle[data-dir="se"] { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+
+/* 四边 */
+.rvc-resize-handle[data-dir="n"] { top: 0; left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
+.rvc-resize-handle[data-dir="s"] { bottom: 0; left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
+.rvc-resize-handle[data-dir="w"] { left: 0; top: 14px; bottom: 14px; width: 6px; cursor: ew-resize; }
+.rvc-resize-handle[data-dir="e"] { right: 0; top: 14px; bottom: 14px; width: 6px; cursor: ew-resize; }
+
+/* 四角圆点指示器（hover 时显示） */
+.rvc-resize-handle[data-dir="nw"]::after,
+.rvc-resize-handle[data-dir="ne"]::after,
+.rvc-resize-handle[data-dir="sw"]::after,
+.rvc-resize-handle[data-dir="se"]::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: transparent;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.rvc-resize-handle[data-dir="nw"]::after { top: 4px; left: 4px; }
+.rvc-resize-handle[data-dir="ne"]::after { top: 4px; right: 4px; }
+.rvc-resize-handle[data-dir="sw"]::after { bottom: 4px; left: 4px; }
+.rvc-resize-handle[data-dir="se"]::after { bottom: 4px; right: 4px; }
+
+.rvc-resize-handle[data-dir="nw"]:hover::after,
+.rvc-resize-handle[data-dir="ne"]:hover::after,
+.rvc-resize-handle[data-dir="sw"]:hover::after,
+.rvc-resize-handle[data-dir="se"]:hover::after {
+  background: rgba(10, 132, 255, 0.7);
+}
+
+/* 四边 hover 高亮 */
+.rvc-resize-handle[data-dir="n"]:hover,
+.rvc-resize-handle[data-dir="s"]:hover,
+.rvc-resize-handle[data-dir="w"]:hover,
+.rvc-resize-handle[data-dir="e"]:hover {
+  background: rgba(10, 132, 255, 0.15);
+}
+
+/* ========== 文件选择浮层 ========== */
+.rvc-folder-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 2147483646;
+  align-items: center;
+  justify-content: center;
+}
+
+.rvc-folder-panel {
+  width: 480px;
+  max-height: 70vh;
+  background: rgba(26, 26, 28, 0.88);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.rvc-folder-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(40, 40, 44, 0.75);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.rvc-folder-close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 16px;
+  border-radius: 4px;
+}
+.rvc-folder-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+.rvc-folder-dir {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.rvc-dir-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: #0d0d0d;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+}
+.rvc-dir-input:focus { outline: none; border-color: #0a84ff; }
+.rvc-dir-btn {
+  padding: 8px 16px;
+  background: #0a84ff;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rvc-dir-btn:hover { background: #0071e3; }
+
+.rvc-dir-browse-btn {
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rvc-dir-browse-btn:hover { background: rgba(255, 255, 255, 0.2); }
+
+/* 访达选目录按钮（弹原生 Finder） */
+.rvc-dir-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(10, 132, 255, 0.18);
+  border: 1px solid rgba(10, 132, 255, 0.4);
+  border-radius: 6px;
+  color: #ddd;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rvc-dir-pick-btn:hover:not(:disabled) { background: rgba(10, 132, 255, 0.32); color: #fff; }
+.rvc-dir-pick-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 固定目录 chips（弹层顶部） */
+.rvc-pinned-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.rvc-pinned-bar:empty { display: none; }
+.rvc-pinned-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  color: #ddd;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rvc-pinned-chip:hover { background: #0a84ff; color: #fff; border-color: #0a84ff; }
+
+/* 固定当前目录钮 */
+.rvc-pin-btn {
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rvc-pin-btn:hover { background: rgba(255, 255, 255, 0.2); }
+
+.rvc-folder-status {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #888;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rvc-folder-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.rvc-folder-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.rvc-folder-item:hover { background: rgba(255, 255, 255, 0.08); }
+
+.rvc-folder-icon {
+  margin-right: 12px;
+  font-size: 20px;
+}
+.rvc-folder-info { flex: 1; min-width: 0; }
+.rvc-folder-name {
+  font-size: 13px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rvc-folder-meta {
+  font-size: 11px;
+  color: #888;
+  margin-top: 3px;
+}
+
+/* 版本标签 */
+.rvc-version-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+.rvc-version-tag.tag-bilingual { background: #0a84ff; color: #fff; }
+.rvc-version-tag.tag-english { background: #6c5ce7; color: #fff; }
+.rvc-version-tag.tag-chinese { background: #00b894; color: #fff; }
+.rvc-version-tag.tag-nosub { background: #636e72; color: #fff; }
+.rvc-version-tag.tag-audio { background: #e17055; color: #fff; }
+
+/* ========== 目录树弹窗 ========== */
+.rvc-tree-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 2147483647;
+  align-items: center;
+  justify-content: center;
+}
+
+.rvc-tree-panel {
+  width: 520px;
+  max-height: 70vh;
+  background: rgba(26, 26, 28, 0.88);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.rvc-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(40, 40, 44, 0.75);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.rvc-tree-close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 16px;
+  border-radius: 4px;
+}
+.rvc-tree-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+.rvc-tree-status {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #888;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rvc-tree-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+  max-height: 50vh;
+}
+
+.rvc-tree-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 13px;
+  color: #ddd;
+}
+.rvc-tree-item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+
+.rvc-tree-icon {
+  margin-right: 8px;
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+}
+
+.rvc-tree-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ========== 自定义按键面板 ========== */
+.rvc-keys-panel {
+  position: absolute;
+  top: 42px;
+  right: 8px;
+  background: rgba(40, 40, 44, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+  z-index: 30;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  min-width: 200px;
+  font-size: 12px;
+  color: #ddd;
+}
+
+.rvc-keys-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 12px;
+}
+
+.rvc-keys-row + .rvc-keys-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rvc-keys-toggle-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.rvc-keys-toggle-btn {
+  padding: 3px 14px;
+  background: rgba(10, 132, 255, 0.2);
+  border: 1px solid rgba(10, 132, 255, 0.4);
+  border-radius: 6px;
+  color: #4db0ff;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 44px;
+  text-align: center;
+}
+
+.rvc-keys-toggle-btn.rvc-keys-off {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #888;
+}
+
+.rvc-key-btn {
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #ddd;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 44px;
+  text-align: center;
+  font-family: monospace;
+  text-transform: uppercase;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.rvc-key-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+.rvc-key-btn.rvc-key-capturing {
+  background: rgba(10, 132, 255, 0.25);
+  border-color: #0a84ff;
+  color: #4db0ff;
+  text-transform: none;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.rvc-keys-reset {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #999;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.rvc-keys-reset:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }

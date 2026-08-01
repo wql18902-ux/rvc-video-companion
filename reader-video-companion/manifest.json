@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Reader 视频伴侣",
+  "version": "3.2.0",
+  "description": "嵌入式视频播放器，文字自动环绕，支持 MKV/MOV 实时转码（需启动本地服务器）",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "https://aim-read.top/*",
+    "http://aim-read.top/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://aim-read.top/*", "http://aim-read.top/*", "http://127.0.0.1:8899/*"],
+      "js": ["mpegts.min.js", "content.js"],
+      "css": ["player.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "点击显示/隐藏嵌入式播放器"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
