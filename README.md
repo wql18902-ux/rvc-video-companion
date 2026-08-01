@@ -32,50 +32,52 @@
 
 ## 快速开始
 
-### 方式零：让 AI Agent 帮你装（推荐）
+### 方式一：一行命令安装（推荐，零拦截）
 
-如果你在用 Claude Code / Cursor / Trae / Cline 等 AI 编程助手，把下面这段话**原样复制**发给你的 Agent，它会自动帮你下载和安装：
+打开「终端」app（Spotlight 搜 Terminal），粘贴下面这行命令后回车：
 
-```
-帮我安装 RVC 视频伴侣。按以下步骤执行，每步完成后告诉我进度：
+**打包版**（无需装 Python/ffmpeg，适合所有人）：
 
-1. 从 https://github.com/wql18902-ux/rvc-video-companion/releases/latest 下载最新的 RVC-Video-Companion.zip 到 ~/Downloads/
-2. 解压到 ~/Downloads/RVC视频伴侣/（如果解压出 __MACOSX 文件夹忽略它）
-3. 移除 macOS 隔离标记（否则双击会报「已损坏，无法打开」）：
-   xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
-4. 启动 ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
-   - 如果仍被拦截：用 `open -R ~/Downloads/RVC视频伴侣/RVC视频伴侣.app` 在访达定位，右键 → 打开 → 确认
-5. 用默认浏览器打开 chrome://extensions
-   - 如果用户用的是 Edge，改用 edge://extensions
-   - 开启右上角「开发者模式」
-   - 点「加载已解压的扩展程序」，选 ~/Downloads/RVC视频伴侣/reader-video-companion 文件夹
-6. 系统会弹「输入监控」权限请求 —— 用于全局热键 S/A/D
-   - 建议允许（不授权也能用页面内热键，但全局热键失效）
-   - 在 系统设置 → 隐私与安全性 → 输入监控 里勾选 RVC视频伴侣
-7. 访问 https://aim-read.top
-   - 点 Chrome 工具栏右上角拼图图标，找到「RVC 视频伴侣」并点固定图标钉到工具栏
-   - 点 RVC 图标唤出浮窗播放器
-8. 点播放器标题栏的文件夹图标 → 弹层里点「浏览」按钮 → 选一个含视频文件的本地目录
-   - macOS 可能在 Dock 闪烁访达图标，点一下切到访达就能看到选目录对话框
-9. 列表里点任意视频文件，应自动开始播放
-10. 验证：键盘 S 暂停/播放、A 后退1秒、D 前进1秒
-   - 鼠标必须悬停在播放器上方，页面内热键才生效
-
-任何一步失败就停下来，告诉我具体错误信息（终端输出 / 浏览器控制台 / 系统弹窗文字），不要自己重试或绕过。
+```bash
+curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/main/packaging/install.sh | bash
 ```
 
-> Agent 装完后，日常使用只需双击 `.app` 启动服务器 + 访问 aim-read.top 点扩展图标。
+**源代码版**（需要 Homebrew，适合开发者）：
 
-### 方式一：下载打包版手动安装（无需装环境）
+```bash
+curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/main/packaging/install-source.sh | bash
+```
+
+> 为什么用 curl？macOS 只对浏览器下载的文件打「隔离标记」，curl 下载的文件不会被 Gatekeeper 拦截，双击即用。
+
+安装完成后按提示加载 Chrome 扩展即可使用。
+
+### 方式二：让 AI Agent 帮你装
+
+如果你在用 Claude Code / Cursor / Trae / Cline 等 AI 编程助手，把下面这段话**原样复制**发给你的 Agent：
+
+```
+帮我安装 RVC 视频伴侣。在终端执行这行命令：
+curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/main/packaging/install.sh | bash
+
+装完后帮我加载 Chrome 扩展：
+1. 打开 chrome://extensions → 开启「开发者模式」
+2. 点「加载已解压的扩展程序」→ 选 ~/Applications/RVC视频伴侣/reader-video-companion
+3. 打开 https://aim-read.top 点扩展图标验证能用
+
+任何一步失败就停下来告诉我具体错误。
+```
+
+### 方式三：手动下载（传统方式）
 
 1. 到 [Releases](../../releases) 下载 `RVC-Video-Companion.zip`
 2. 解压
 3. 终端执行 `xattr -cr RVC视频伴侣.app`（移除隔离标记，否则报「已损坏」）
 4. 双击「RVC视频伴侣.app」启动服务器
-4. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选解压出的 `reader-video-companion` 文件夹
-5. 访问 [aim-read.top](https://aim-read.top)，点扩展图标唤出播放器
+5. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选解压出的 `reader-video-companion` 文件夹
+6. 访问 [aim-read.top](https://aim-read.top)，点扩展图标唤出播放器
 
-### 方式二：从源码运行（开发者）
+### 方式四：从源码运行（开发者）
 
 ```bash
 # 启服务器（端口 8765）
