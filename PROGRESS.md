@@ -2,21 +2,27 @@
 
 > 更新：2026-08-01 哈希冻结收窄到判卷基准 + 分层测试覆盖负向路径（转码失败/端口占用/播放中断）+ 变更→受影响路由映射，L0/L1/L2 全绿。
 
-## 2026-08-01 .app 签名链路修复（build.sh 官方布局+分步签名，产物待重建验证）
+## 2026-08-02 .app 签名链路真正跑通（build.sh 三 bug 修复 + spctl 可绕过）
 
 ### 背景（实测根因）
 - 用户反馈：从 GitHub 下载 zip 解压后双击 .app 报「已损坏，无法打开」→ **死路**（无「仍要打开」选项），而别人未公证 app 是「无法验证开发者」→ 右键打开 → 仍要打开（可绕过）。
 - 根因：build.sh 把 PyInstaller `_internal/` 平铺进 `Contents/Frameworks/`，codesign 把 Frameworks 下所有文件当「代码」要求签名 → 数据文件/目录（player.html、base_library.zip、python3.14）逐个报 bundle format unrecognized → 签名不完整 → `codesign --verify` 报 `code has no resources` → spctl 判「已损坏」。
 
-### 改动（build.sh，已提交 f2530c0）
+### 改动（build.sh，f2530c0 起草 + 4aeab3c 修通）
 - 纯数据文件（player.html/mpegts.min.js/base_library.zip）从 Frameworks 移入 Resources + Frameworks 留 `../Resources/xxx` 软链（保持 sys._MEIPASS 路径解析不变）。
 - **python3.14 不移**（Cody dlopen 实验证伪：dyld 按 realpath 解析 @loader_path，移动后 lib-dynload 的 LC_RPATH 找不到 libssl/libcrypto → import 崩溃）；它留在 Frameworks 由分步签名逐 .so 处理。
 - 4 步分步签名（不带 --deep）：①所有独立 Mach-O（跳过 Python.framework 内部）②.framework 目录（失败非致命）③主二进制 `--identifier com.rvc.stream-server` ④外层 .app。
 - 验收门禁：`codesign --verify --deep --strict` 全绿 + `spctl -a -vv --type execute` rejected 且非 sealed resource = 可绕过目标态。
 - ffmpeg dylib 前缀：实测当前 .app 用 @rpath + LC_RPATH @loader_path/../.. 且可运行，build.sh L88 改写因 `|| true` 未生效恰好可用，**不改**（改反而有风险）。
 
+### 2026-08-02 修通的三处真 bug（f2530c0 起一直 PENDING，因历次跑在更早沙箱删除步挂了没走到这行）
+1. **line 146 `unbound variable`**：`echo "...：$f（...）"` 中 `$f` 紧跟全角括号 `（`（UTF-8 多字节），bash 在 UTF-8 locale 把多字节字节吸收进变量名 → `set -u` 报 `f<…>: unbound variable` 中断。修：`$f` → `${f}` 显式界定。
+2. **python3.14 framework 结构补全**：codesign 把 `Frameworks/` 下任何目录当 framework 子包，但 `python3.14` 是光秃秃目录（无 `Versions/`/`Info.plist`）→ `bundle format unrecognized`。修：补 `python3.14/Versions/3.14/Resources/Info.plist` + 顶层 symlink，**lib-dynload 留原位**（不碰 `@loader_path`，dlopen 不崩）。
+3. **python3.14 显式 bundle 签名**：step2 的 `find . -name '*.framework'` 不匹配无后缀的 `python3.14`，漏签 → step3 签主二进制时报 `code object is not signed at all`。修：step2 补 `codesign --force -s - Contents/Frameworks/python3.14`。
+
 ### 状态
-- **PENDING（阻塞）**：构建未跑成——WorkBuddy 沙箱批量删除保护拦 `rm -rf staging`（>50 文件需确认）。dist 仍是 18:01 旧版（签名损坏）。重建方式：终端跑 `cd ~/ai-brain/浏览器播放器系统 && bash stream-server/packaging/build.sh`（无沙箱）或沙箱外授权重跑。重建后须跑签名验收（codesign/spctl 判据）+ 启动冒烟 + 12/12 回归。
+- ✅ **DONE**：`bash stream-server/packaging/build.sh` 全程跑通（commit 4aeab3c）。验收：`codesign --verify --deep --strict` 全绿 / `spctl -a -vv --type execute` → `rejected`（可绕过，非「已损坏」死路）/ 启动冒烟 `/api/health` → `{"ok": true, "name": "RVC 视频伴侣", "ffmpeg": true, ...}` / 12/12 回归通过。Release v3.2.2 资产 `RVC-Video-Companion.zip` 已覆盖为新构建（commit 4aeab3c 推送 + Release 资产 clobber）。
+- **遗留（非阻塞）**：打包版 `/api/health` 返回 `version: "unknown"`（应为 `3.2.2`，ADR-001 版本源注入在打包态没读到 manifest.json）。功能正常，单独排查。
 
 ## 2026-08-01 哈希冻结收窄 + 分层测试覆盖负向路径（c2-single-frozen-validation-layer）
 

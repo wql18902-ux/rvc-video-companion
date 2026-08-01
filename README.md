@@ -35,7 +35,7 @@
    ```bash
    xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
    ```
-   （路径根据你实际解压位置调整。这一步清除 macOS 隔离标记，只需做一次）
+   （路径根据你实际解压位置调整。这一步清除 macOS 隔离标记，跳过验证弹窗，只需做一次；不做也行，双击提示「无法验证开发者」时右键点它 → 打开 → 仍要打开即可）
 4. 双击「RVC视频伴侣.app」启动服务器
 5. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选解压出的 `reader-video-companion` 文件夹
 6. 访问 [aim-read.top](https://aim-read.top)，点扩展图标唤出播放器
