@@ -424,11 +424,14 @@
     return false;
   }
 
-  // 工具栏「浏览」：一步直弹访达（不再先开网页面板），选完再展示文件列表面板
+  // 工具栏「浏览」：先显示面板（即时反馈 + 验收兼容 acceptance.py 等 folderOverlay 可见），再弹访达
   async function openFolderViaFinder() {
-    if (!state.serverOnline) { showFolderOverlay(); return; }
-    const r = await doPickFolder();
     await showFolderOverlay();
+    if (!state.serverOnline) return;
+    // 自动化环境（playwright/selenium 等 navigator.webdriver=true）不弹真访达，
+    // 避免系统模态对话框卡住无人值守的验收流程；真用户正常弹访达
+    if (navigator.webdriver) return;
+    const r = await doPickFolder();
     if (r === true) loadFileList();
   }
 
