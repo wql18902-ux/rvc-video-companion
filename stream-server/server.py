@@ -16,6 +16,7 @@ import signal
 import sys
 import queue
 import time
+import datetime
 
 PORT = 8765
 DEFAULT_DIR = os.path.expanduser("~/Downloads")
@@ -298,16 +299,18 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """弹出原生文件选择对话框，选择视频目录。
         成功返回 {ok:true,dir:/abs/path/}；用户取消返回 {cancelled:true}；
         超时/报错返回 {ok:false,error:...}。"""
-        # 单段 AppleScript：activate 与 choose folder 同在 tell "System Events" 块内，
-        # 确保对话框弹到最前面（choose folder 单独调用会躲在浏览器后）。
+        # 纯 Standard Additions 的 choose folder + activate me，不需要自动化权限
+        # （tell System Events 会触发 -1743 权限弹窗，python 升级后权限失效）
+        # 对话框可能不自动前置，用户需从 Dock 点访达
+        with open('/tmp/rvc-pick-folder.log', 'a') as _log:
+            _log.write(f'[{datetime.datetime.now()}] pick-folder 被调用\n')
+            _log.flush()
         clean_env = {k: v for k, v in os.environ.items() if k not in ('PYTHONHOME', 'PYTHONPATH')}
         try:
             result = subprocess.run(
                 ['osascript', '-e',
-                 'tell application "System Events"',
-                 '-e', 'activate',
+                 'activate me',
                  '-e', 'set f to choose folder',
-                 '-e', 'end tell',
                  '-e', 'return POSIX path of f'],
                 capture_output=True, text=True, timeout=60, env=clean_env
             )

@@ -39,6 +39,16 @@
     keybindings: { toggle_play: 's', back: 'a', forward: 'd' }  // 自定义按键（chrome.storage.local 持久化）
   };
 
+  // 一次性迁移：layout schema 不匹配时清掉旧 rvc-layout（fixed 时代残留的异常尺寸/位置会导致 player 超出视口）
+  const LAYOUT_SCHEMA = 'v3.2.2-sticky';
+  try {
+    chrome.storage.local.get('rvc-layout-schema').then(v => {
+      if (v && v['rvc-layout-schema'] === LAYOUT_SCHEMA) return;
+      chrome.storage.local.remove('rvc-layout');
+      chrome.storage.local.set({ 'rvc-layout-schema': LAYOUT_SCHEMA });
+    }).catch(() => {});
+  } catch (e) {}
+
   // ========== 查找文章内容容器 ==========
   function findArticleContainer() {
     const selectors = [
@@ -67,7 +77,7 @@
       parent = parent.parentElement;
     }
   }
-  
+
   // 创建播放器DOM
   function createPlayer() {
     const player = document.createElement('div');
@@ -191,7 +201,7 @@
     `;
     document.body.appendChild(treeOverlay);
 
-    // 插入到文章内容容器中（而非 body）
+    // sticky 嵌入文章容器顶部：跟随文章滚动，float:right 让正文环绕
     const container = findArticleContainer();
     container.insertBefore(player, container.firstChild);
 
@@ -226,7 +236,7 @@
   // ========== 监听扩展图标点击（toggle 显示/隐藏）==========
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === 'rvc-toggle') {
-      // SPA 页面重建 DOM 时 player 可能被移除，重新挂载
+      // SPA 页面重建 DOM 时 player 可能被移除，重新挂载到文章容器顶部
       if (!document.body.contains(player)) {
         const container = findArticleContainer();
         container.insertBefore(player, container.firstChild);
@@ -343,7 +353,8 @@
     }
     folderOverlay.style.display = 'flex';
     renderPinnedChips();
-    storageReady.then(() => loadFileList());
+    // 不自动 loadFileList：避免覆盖用户 fill 的路径（race condition）
+    // 用户点"刷新"或 fill 后回车才 loadFileList
   }
 
   function hideFolderOverlay() {
@@ -502,11 +513,13 @@
   }
 
   elements.pinBtn.addEventListener('click', () => {
-    const dir = elements.dirInput.value.trim();
-    if (!dir) return;
-    state.pinnedDirs = [dir, ...state.pinnedDirs.filter(d => d !== dir)].slice(0, PINNED_MAX);
-    savePinnedDirs();
-    renderPinnedChips();
+    storageReady.then(() => {
+      const dir = elements.dirInput.value.trim();
+      if (!dir) return;
+      state.pinnedDirs = [dir, ...state.pinnedDirs.filter(d => d !== dir)].slice(0, PINNED_MAX);
+      savePinnedDirs();
+      renderPinnedChips();
+    });
   });
 
   // 恢复固定目录列表 + 上次目录 + 自动续播上次视频（刷新后 chips 仍在、视频续播）
@@ -685,8 +698,8 @@
   });
 
   // ========== 拖动功能（transform 位移，兼容 sticky+float） ==========
-  // v2 用 left/top，但播放器是 sticky+float 嵌入，left/top 是吸附约束不是自由偏移，
-  // 拖动改 left/top 视觉不位移（G1/G2 0px 根因）-> 改 transform: translate 位移。
+  // sticky+float 嵌入时 left/top 是吸附约束不是自由偏移，拖动改 left/top 视觉不位移
+  // （v3.2.1 实测 G1/G2 0px 根因）-> 改 transform: translate 位移
   let dragOffset = { x: 0, y: 0 };
   const drag = { active: false, startX: 0, startY: 0, startOX: 0, startOY: 0, moved: false, isVideo: false };
 
@@ -761,8 +774,9 @@
       chrome.storage.local.get('rvc-layout').then((result) => {
         const data = result && result['rvc-layout'];
         if (!data) return;
-        if (data.width) player.style.width = data.width + 'px';
-        if (data.height) player.style.height = data.height + 'px';
+        // width 下限保护：忽略 < 360 的异常窄值（fixed 时代残留的脏数据），让 CSS 默认 420px 生效
+        if (data.width && data.width >= 360) player.style.width = data.width + 'px';
+        if (data.height && data.height >= 160) player.style.height = data.height + 'px';
         if (data.left) player.style.left = data.left + 'px';
         if (data.top) player.style.top = data.top + 'px';
         if (typeof data.tx === 'number') dragOffset.x = data.tx;
