@@ -2,6 +2,12 @@
 
 > 更新：2026-08-01 后续会话——重建打包版 .app + 分发包 zip，B11/B12 已解决关闭。B1 仍有效。
 
+## B14. PROGRESS.md 判卷指纹存档过期（2026-08-01 安全修复任务 0 发现）
+
+- 现象：任务 0 核对 shasum，实测 acceptance.py=ff550f24/test.html=a4c77dd6/sample.mp4=bdd72076，与 PROGRESS.md 存档 c1965638/4b79893e/9b4a8281 全部不符。
+- 排查：git 初始提交 2a89173（v3.2.1 开源初始提交）中三文件指纹 = ff550f24/a4c77dd6/bdd72076，与当前工作区一字不差 → 判卷文件未被篡改，存档为过期记录（疑早期未提交版本指纹）。
+- 判定：不阻塞，以 git 初始提交指纹（= 实测）为当前判卷基线，PROGRESS.md 存档待后续同步更新。
+
 ## B13. 选目录弹窗前置 frontmost 机器半验受限（待领导亲验，不阻塞）
 
 - 现象：任务2验收第1项，curl /api/pick-folder 挂起中 osascript 查 frontmost 期望 "System Events"，实测三版（System Events activate / Finder activate / set frontmost of process）均返回 "Electron"（测试环境 Electron 应用持续占前台，疑 Claude Desktop 或 VS Code 宿主抢焦点）。

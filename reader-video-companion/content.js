@@ -26,6 +26,16 @@
     pin: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z"/></svg>'
   };
 
+  // HTML 转义：所有用户可控字符串（文件名/目录名/服务器错误信息）插入 innerHTML 前必须经过此函数
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // 状态
   const state = {
     isPlaying: false,
@@ -394,10 +404,10 @@
       } else if (data.cancelled) {
         // 用户取消，静默不报错
       } else if (data.error) {
-        elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + ICON.alert + ' ' + data.error + '</span>';
+        elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + ICON.alert + ' ' + escapeHtml(data.error) + '</span>';
       }
     } catch (e) {
-      elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">访达选择失败: ' + e.message + '</span>';
+      elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">访达选择失败: ' + escapeHtml(e.message) + '</span>';
     } finally {
       elements.dirPickBtn.textContent = '';
       elements.dirPickBtn.innerHTML = ICON.folder + ' 浏览';
@@ -449,7 +459,7 @@
       const res = await fetch(SERVER + '/api/files?dir=' + encodeURIComponent(dir));
       const data = await res.json();
       if (data.error) {
-        elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + data.error + '</span>';
+        elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + escapeHtml(data.error) + '</span>';
         return;
       }
       if (!data.files || data.files.length === 0) {
@@ -469,8 +479,8 @@
         item.innerHTML = `
           <span class="rvc-folder-icon">${needTranscode ? ICON.package : ICON.film}</span>
           <div class="rvc-folder-info">
-            <div class="rvc-folder-name">${f.name}${renderVersionTags(tags)}</div>
-            <div class="rvc-folder-meta">${f.ext.toUpperCase()} · ${sizeMB} MB${needTranscode ? ' · 转码播放' : ''}</div>
+            <div class="rvc-folder-name">${escapeHtml(f.name)}${renderVersionTags(tags)}</div>
+            <div class="rvc-folder-meta">${escapeHtml(f.ext.toUpperCase())} · ${sizeMB} MB${needTranscode ? ' · 转码播放' : ''}</div>
           </div>
         `;
         item.addEventListener('click', () => {
@@ -480,7 +490,7 @@
         elements.folderList.appendChild(item);
       });
     } catch (e) {
-      elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">请求失败: ' + e.message + '</span>';
+      elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">请求失败: ' + escapeHtml(e.message) + '</span>';
     }
   }
 
@@ -579,7 +589,7 @@
       const res = await fetch(SERVER + '/api/tree?dir=' + encodeURIComponent(dir));
       const data = await res.json();
       if (data.error) {
-        elements.treeStatus.innerHTML = '<span style="color:#ff6b6b;">' + data.error + '</span>';
+        elements.treeStatus.innerHTML = '<span style="color:#ff6b6b;">' + escapeHtml(data.error) + '</span>';
         return;
       }
       if (!data.tree) {
@@ -589,7 +599,7 @@
       elements.treeStatus.textContent = '点击目录选择，含视频的目录有图标标记';
       renderTreeNode(data.tree, elements.treeList, 0);
     } catch (e) {
-      elements.treeStatus.innerHTML = '<span style="color:#ff6b6b;">请求失败: ' + e.message + '</span>';
+      elements.treeStatus.innerHTML = '<span style="color:#ff6b6b;">请求失败: ' + escapeHtml(e.message) + '</span>';
     }
   }
 
@@ -600,7 +610,7 @@
     const icon = node.hasVideo ? ICON.film : ICON.folder;
     row.innerHTML = `
       <span class="rvc-tree-icon">${icon}</span>
-      <span class="rvc-tree-name">${node.name}</span>
+      <span class="rvc-tree-name">${escapeHtml(node.name)}</span>
     `;
     row.addEventListener('click', () => {
       elements.dirInput.value = node.path;
@@ -1280,8 +1290,15 @@
   // 仅当键盘控制开启 且 页面无焦点（用户不在 aim-read.top 当前 tab）时才响应 SSE。
   // 页面有焦点时本地 keydown 会处理，跳过 SSE 避免双触发。
   // 焦点在 input/textarea 时本地 keydown 被抑制，放行 SSE 保证输入时仍可控。
+  // evtSource 为模块级单例：onerror 重连前必须 close 旧实例，防止双连接累积泄漏
+  let sseSource = null;
   (function connectControlSSE() {
+    if (sseSource) {
+      sseSource.close();
+      sseSource = null;
+    }
     const evtSource = new EventSource(SERVER + '/api/control');
+    sseSource = evtSource;
     evtSource.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
@@ -1309,6 +1326,10 @@
       } catch (err) {}
     };
     evtSource.onerror = () => {
+      if (sseSource === evtSource) {
+        sseSource = null;
+      }
+      evtSource.close();
       setTimeout(connectControlSSE, 3000);
     };
   })();

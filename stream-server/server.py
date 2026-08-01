@@ -22,6 +22,18 @@ PORT = 8765
 DEFAULT_DIR = os.path.expanduser("~/Downloads")
 VIDEO_EXTS = {'.mkv', '.mov', '.avi', '.flv', '.webm', '.mp4', '.m4v'}
 
+# 鉴权白名单：扩展注入页面 + 本地测试页 + 扩展自身（background 发请求时 Origin 为 chrome-extension://）
+ALLOWED_ORIGINS = {
+    'https://aim-read.top',
+    'http://aim-read.top',
+    'http://127.0.0.1:8899',
+}
+ALLOWED_HOSTS = {'127.0.0.1:8765', 'localhost:8765'}
+# serve_file（原生直发）只允许浏览器可直播的扩展名
+SERVE_FILE_EXTS = {'.mp4', '.m4v', '.webm'}
+# SSE 最大并发连接数（防线程耗尽，每连接占一线程）
+MAX_SSE_CLIENTS = 10
+
 
 def find_ffmpeg_bin():
     """PyInstaller 打包后优先使用 .app 内置的 ffmpeg/ffprobe，否则退回 PATH"""
@@ -151,10 +163,32 @@ def kill_current_proc():
 
 
 class StreamHandler(http.server.BaseHTTPRequestHandler):
+    def check_origin(self):
+        """鉴权：有 Origin 头必须命中白名单；无 Origin（热键子进程/本地 curl）校验 Host。
+        返回 True 放行，False 拒绝。"""
+        origin = self.headers.get('Origin')
+        if origin:
+            return origin in ALLOWED_ORIGINS or origin.startswith('chrome-extension://')
+        host = self.headers.get('Host', '')
+        return host in ALLOWED_HOSTS
+
+    def safe_join(self, dir_path, file_path):
+        """路径校验：realpath 后必须仍在 dir 的 realpath 前缀内，防 .. 穿越。
+        返回 (base, full_path)；越界返回 (None, None)。"""
+        base = os.path.realpath(os.path.expanduser(dir_path))
+        full = os.path.realpath(os.path.join(base, file_path))
+        if not full.startswith(base + os.sep) and full != base:
+            return None, None
+        return base, full
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
+
+        if path.startswith('/api/') and not self.check_origin():
+            self.send_error(403, "Forbidden")
+            return
 
         if path == '/':
             self.serve_html('player.html')
@@ -182,6 +216,9 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith('/api/') and not self.check_origin():
+            self.send_error(403, "Forbidden")
+            return
         if parsed.path == '/api/control-key':
             self.serve_control_key()
         else:
@@ -206,9 +243,15 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
     def send_json(self, data):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._cors_header()
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
+
+    def _cors_header(self):
+        """CORS 白名单回显：仅对命中白名单的 Origin 回显；无 Origin（本地进程）不加头"""
+        origin = self.headers.get('Origin')
+        if origin and (origin in ALLOWED_ORIGINS or origin.startswith('chrome-extension://')):
+            self.send_header('Access-Control-Allow-Origin', origin)
 
     def serve_html(self, filename):
         html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
@@ -340,9 +383,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """用 ffprobe 获取视频时长"""
         file_path = params.get('file', [''])[0]
         dir_path = params.get('dir', [DEFAULT_DIR])[0]
-        dir_path = os.path.expanduser(dir_path)
-        full_path = os.path.join(dir_path, file_path)
-        if not os.path.isfile(full_path):
+        base, full_path = self.safe_join(dir_path, file_path)
+        if full_path is None or not os.path.isfile(full_path):
             self.send_json({'error': '文件不存在'})
             return
         try:
@@ -360,14 +402,19 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """原生分发视频文件（支持 HTTP Range），供 MP4/M4V/WebM 直接播放"""
         file_path = params.get('file', [''])[0]
         dir_path = params.get('dir', [DEFAULT_DIR])[0]
-        dir_path = os.path.expanduser(dir_path)
-        full_path = os.path.join(dir_path, file_path)
+        base, full_path = self.safe_join(dir_path, file_path)
+        if full_path is None:
+            self.send_error(404)
+            return
 
         if not os.path.isfile(full_path):
-            self.send_error(404, "文件不存在")
+            self.send_error(404)
             return
 
         ext = os.path.splitext(full_path)[1].lower()
+        if ext not in SERVE_FILE_EXTS:
+            self.send_error(404)
+            return
         ctype = {
             '.mp4': 'video/mp4',
             '.m4v': 'video/mp4',
@@ -399,14 +446,14 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         try:
             f = open(full_path, 'rb')
         except OSError:
-            self.send_error(404, "无法读取文件")
+            self.send_error(404)
             return
 
         self.send_response(206 if is_range else 200)
         self.send_header('Content-Type', ctype)
         self.send_header('Accept-Ranges', 'bytes')
         self.send_header('Content-Length', str(length))
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._cors_header()
         if is_range:
             self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
         self.end_headers()
@@ -427,26 +474,35 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             f.close()
 
     def serve_control_sse(self):
-        """SSE 端点：全局热键事件流，播放器页面连接后实时接收控制指令"""
-        client_q = queue.Queue(maxsize=8)
+        """SSE 端点：全局热键事件流，播放器页面连接后实时接收控制指令。
+        心跳保活：每 15s 写一次注释行（EventSource 忽略），不再 30s 主动断开；
+        连接数上限 MAX_SSE_CLIENTS，超限拒绝新连接防线程耗尽。"""
         with control_clients_lock:
+            if len(control_clients) >= MAX_SSE_CLIENTS:
+                self.send_response(503)
+                self.end_headers()
+                return
+            client_q = queue.Queue(maxsize=8)
             control_clients.append(client_q)
 
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache, no-store')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._cors_header()
         self.send_header('Connection', 'keep-alive')
         self.end_headers()
 
         try:
             while True:
-                action = client_q.get(timeout=30)
-                data = json.dumps({'action': action, 't': time.time()})
-                self.wfile.write(f'data: {data}\n\n'.encode())
-                self.wfile.flush()
-        except queue.Empty:
-            pass
+                try:
+                    action = client_q.get(timeout=15)
+                    data = json.dumps({'action': action, 't': time.time()})
+                    self.wfile.write(f'data: {data}\n\n'.encode())
+                    self.wfile.flush()
+                except queue.Empty:
+                    # 心跳保活：写注释行，浏览器 EventSource 忽略，连接保持活跃
+                    self.wfile.write(b': ping\n\n')
+                    self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
@@ -461,21 +517,23 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         dir_path = params.get('dir', [DEFAULT_DIR])[0]
         start = params.get('start', ['0'])[0]
 
-        dir_path = os.path.expanduser(dir_path)
-        full_path = os.path.join(dir_path, file_path)
+        base, full_path = self.safe_join(dir_path, file_path)
+        if full_path is None:
+            self.send_error(404)
+            return
 
         if not os.path.isfile(full_path):
-            self.send_error(404, "文件不存在")
+            self.send_error(404)
             return
 
         # 终止旧进程
         kill_current_proc()
 
-        # 允许 CORS（虽然同源，但保险起见）
+        # 允许 CORS（白名单 Origin 回显）
         self.send_response(200)
         self.send_header('Content-Type', 'video/mp2t')
         self.send_header('Cache-Control', 'no-cache, no-store')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._cors_header()
         self.end_headers()
 
         # 构建 ffmpeg 命令

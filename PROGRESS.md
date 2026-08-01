@@ -1,6 +1,32 @@
 # PROGRESS - Reader 视频伴侣（浏览器播放器系统）
 
-> 更新：2026-08-01 洁癖收尾——同步 NSOpenPanel 改动、emoji 清理、zip 大小修正。本文件是项目记忆，给下次会话的 AI 读。
+> 更新：2026-08-01 安全修复（4 Critical）开工——任务 0 完成，基线 12/12 全绿。
+
+## 2026-08-01 安全修复：4 个 Critical（任务书-修复4个Critical安全项）
+
+### 开工回执（任务 0，2026-08-01 19:45）
+- 目标：修 4 个 Critical（CORS 通配+无鉴权→任意文件读取、路径穿越、XSS、SSE 连接泄漏）。让步：安全正确 > 功能不动（12/12 仍绿）> 代码整洁。
+- 顺序：0 核对 → 1 server.py 鉴权 → 2 content.js XSS → 3 SSE 泄漏 → 4 回归。
+- 白名单：server.py / content.js / PROGRESS.md / BLOCKED.md。tests/ 全冻结。
+- 任务 0 核对：CORS `*` 4 处（L209/409/438/478）✓；innerHTML=22 处基线 ✓；服务器起 8765 探活 200 ✓；基线验收 12/12 全绿 ✓。
+- **关键发现 B14**：判卷指纹实测 ff550f24/a4c77dd6/bdd72076 与 PROGRESS 存档 c1965638/4b79893e/9b4a8281 全部不符；git 初始提交 2a89173 指纹 = 实测，证判卷文件未被篡改，存档过期。已写 BLOCKED.md。
+- 最大风险：鉴权改动可能误伤热键子进程（无 Origin POST）；CORS 改白名单后 127.0.0.1:8899 测试页 Origin 必须放行（否则验收全挂）。
+
+### 任务 1：server.py 鉴权+CORS 白名单+路径校验（已完成，2026-08-01 19:55）
+- server.py 新增：ALLOWED_ORIGINS（aim-read.top http/https、127.0.0.1:8899）+ ALLOWED_HOSTS（127.0.0.1:8765/localhost:8765）+ SERVE_FILE_EXTS；StreamHandler 新增 check_origin()（有 Origin 走白名单，无 Origin 校验 Host，兼容热键子进程）+ safe_join()（realpath+前缀校验）+ _cors_header()（白名单回显）；do_GET/do_POST 对 /api/* 统一鉴权；serve_file/duration/stream 改 safe_join；serve_file 限扩展名。
+- 附带修复预存 bug：send_error(404, "中文") 的 HTTP reason phrase 需 latin-1 编码会崩（路径校验触发 404 分支才暴露），全部改无 message 版本。
+- 验收 6 条全过：dir=/&file=etc/passwd→404（旧代码能读 /etc/passwd 红→绿）、evil Origin→403、aim-read.top→200、evil Host→403、热键无 Origin POST→200、CORS `*` 残留=0。
+
+### 任务 2：content.js XSS 修复（已完成，2026-08-01 19:57）
+- 新增 escapeHtml()（转义 &<>"'）；替换全部用户可控拼接点：folderStatus/treeStatus 的 data.error、e.message（L407/410/462/493/592/602）、文件名渲染（L479 f.name/f.ext）、目录树名（L611 node.name）。纯 HTML 模板与 ICON 常量拼接未动。
+- 验收：node -c 通过；grep 确认无未转义直拼；恶意文件名 `<img onerror>` 经转义无真实标签边界（PASS）。
+
+### 任务 3：SSE 连接泄漏修复（已完成，2026-08-01 20:00）
+- content.js：SSE 改模块级单例 sseSource，connectControlSSE 入口先 close 旧实例，onerror 先置空再 close 再 setTimeout 重连。
+- server.py：serve_control_sse 心跳保活（15s 写 `: ping` 注释行替代 30s 主动断）；MAX_SSE_CLIENTS=10 超限 503。
+- 验收：POST control-key→SSE 收到 toggle_play 事件 ✓；连接跨 20s 仍活跃（收到 : ping）✓；并发 12 连接 9×200+3×503（上限生效）✓。
+
+### 任务 4：回归（进行中）
 
 ## 2026-08-01 打包版「浏览」无反应修复（任务书-打包版浏览修复）
 
