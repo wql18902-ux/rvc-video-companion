@@ -2,6 +2,22 @@
 
 > 更新：2026-08-01 哈希冻结收窄到判卷基准 + 分层测试覆盖负向路径（转码失败/端口占用/播放中断）+ 变更→受影响路由映射，L0/L1/L2 全绿。
 
+## 2026-08-01 .app 签名链路修复（build.sh 官方布局+分步签名，产物待重建验证）
+
+### 背景（实测根因）
+- 用户反馈：从 GitHub 下载 zip 解压后双击 .app 报「已损坏，无法打开」→ **死路**（无「仍要打开」选项），而别人未公证 app 是「无法验证开发者」→ 右键打开 → 仍要打开（可绕过）。
+- 根因：build.sh 把 PyInstaller `_internal/` 平铺进 `Contents/Frameworks/`，codesign 把 Frameworks 下所有文件当「代码」要求签名 → 数据文件/目录（player.html、base_library.zip、python3.14）逐个报 bundle format unrecognized → 签名不完整 → `codesign --verify` 报 `code has no resources` → spctl 判「已损坏」。
+
+### 改动（build.sh，已提交 f2530c0）
+- 纯数据文件（player.html/mpegts.min.js/base_library.zip）从 Frameworks 移入 Resources + Frameworks 留 `../Resources/xxx` 软链（保持 sys._MEIPASS 路径解析不变）。
+- **python3.14 不移**（Cody dlopen 实验证伪：dyld 按 realpath 解析 @loader_path，移动后 lib-dynload 的 LC_RPATH 找不到 libssl/libcrypto → import 崩溃）；它留在 Frameworks 由分步签名逐 .so 处理。
+- 4 步分步签名（不带 --deep）：①所有独立 Mach-O（跳过 Python.framework 内部）②.framework 目录（失败非致命）③主二进制 `--identifier com.rvc.stream-server` ④外层 .app。
+- 验收门禁：`codesign --verify --deep --strict` 全绿 + `spctl -a -vv --type execute` rejected 且非 sealed resource = 可绕过目标态。
+- ffmpeg dylib 前缀：实测当前 .app 用 @rpath + LC_RPATH @loader_path/../.. 且可运行，build.sh L88 改写因 `|| true` 未生效恰好可用，**不改**（改反而有风险）。
+
+### 状态
+- **PENDING（阻塞）**：构建未跑成——WorkBuddy 沙箱批量删除保护拦 `rm -rf staging`（>50 文件需确认）。dist 仍是 18:01 旧版（签名损坏）。重建方式：终端跑 `cd ~/ai-brain/浏览器播放器系统 && bash stream-server/packaging/build.sh`（无沙箱）或沙箱外授权重跑。重建后须跑签名验收（codesign/spctl 判据）+ 启动冒烟 + 12/12 回归。
+
 ## 2026-08-01 哈希冻结收窄 + 分层测试覆盖负向路径（c2-single-frozen-validation-layer）
 
 ### 目标
