@@ -1,0 +1,20 @@
+name: RVC CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: Run tests (L0+L1+L2)
+        run: bash run_tests.sh
+        # 不加 --full：L3 验收需要浏览器环境，CI 无法运行
