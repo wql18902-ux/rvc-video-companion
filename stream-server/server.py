@@ -80,6 +80,37 @@ def find_ffmpeg_bin():
 FFMPEG_BIN = find_ffmpeg_bin()
 
 
+def read_app_version():
+    """读取版本号唯一源 reader-video-companion/manifest.json（ADR-001）；失败返回 unknown"""
+    try:
+        if getattr(sys, 'frozen', False):
+            base = os.path.dirname(os.path.abspath(sys.executable))
+            candidates = [
+                os.path.join(base, '..', 'Resources', 'reader-video-companion', 'manifest.json'),
+                os.path.join(base, '..', '..', 'reader-video-companion', 'manifest.json'),
+            ]
+        else:
+            candidates = [os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'reader-video-companion', 'manifest.json')]
+        for c in candidates:
+            if os.path.isfile(c):
+                with open(c, encoding='utf-8') as f:
+                    return json.load(f).get('version', 'unknown')
+    except Exception:
+        pass
+    return 'unknown'
+
+
+APP_VERSION = read_app_version()
+
+
+def ffmpeg_available():
+    """转码能力是否可用：打包内置优先，否则回退 PATH 中的 ffmpeg"""
+    if FFMPEG_BIN is not None:
+        return True
+    import shutil
+    return shutil.which('ffmpeg') is not None
+
+
 def ffmpeg_cmd(binary):
     """返回 ffmpeg/ffprobe 可执行文件路径（打包优先内置，未打包用 PATH 原名）"""
     if FFMPEG_BIN:
@@ -284,6 +315,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             self.serve_html('player.html')
         elif path == '/mpegts.min.js':
             self.serve_static('mpegts.min.js', 'application/javascript')
+        elif path == '/api/health':
+            self.serve_health()
         elif path == '/api/files':
             self.serve_file_list(params)
         elif path == '/api/tree':
@@ -315,6 +348,22 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             self.serve_control_key()
         else:
             self.send_error(404)
+
+    def serve_health(self):
+        """健康探针（ADR-004）：返回进程存活、版本、ffmpeg 可用性、SSE 连接数。
+        供 start.sh/check.sh/install.sh 探活，替代复用语义化的 /api/files。"""
+        with control_clients_lock:
+            sse_count = len(control_clients)
+        self.send_json({
+            'ok': True,
+            'name': 'RVC 视频伴侣',
+            'version': APP_VERSION,
+            'pid': os.getpid(),
+            'ffmpeg': ffmpeg_available(),
+            'ffmpeg_source': 'builtin' if FFMPEG_BIN is not None else 'PATH',
+            'sse_clients': sse_count,
+            'port': PORT,
+        })
 
     def serve_control_key(self):
         """内部端点：接收热键子进程 POST 的事件，转手广播给 SSE 客户端"""
@@ -762,10 +811,11 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             store_transcode_result(req_id, err[0] if err else None, log_name)
 
     def log_message(self, format, *args):
-        # 简化日志，只打印非静态资源请求
+        # 简化日志，只打印非静态资源请求；带时间戳前缀（ADR-004 可观测性）
         msg = format % args
         if '/mpegts' not in msg and '/api/' in msg:
-            print(f"  {msg}")
+            ts = datetime.datetime.now().strftime('%H:%M:%S')
+            print(f"  [{ts}] {msg}")
 
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -798,6 +848,7 @@ if __name__ == '__main__':
     if is_port_in_use(PORT):
         print("=" * 50)
         print("  [OK] 服务器已在运行（无需重复启动）")
+        print(f"  [INFO] RVC 视频伴侣 v{APP_VERSION}")
         print(f"  [INFO] 地址：http://127.0.0.1:{PORT}")
         print("=" * 50)
         print()
@@ -812,8 +863,9 @@ if __name__ == '__main__':
 
     server = ThreadedHTTPServer(('127.0.0.1', PORT), StreamHandler)
     print("=" * 50)
-    print("  [INFO] RVC 视频伴侣")
+    print(f"  [INFO] RVC 视频伴侣 v{APP_VERSION}")
     print(f"  [INFO] 地址：http://127.0.0.1:{PORT}")
+    print(f"  [INFO] ffmpeg：{'内置' if FFMPEG_BIN else 'PATH'}")
     print(f"  [INFO] 默认目录：{DEFAULT_DIR}")
     print("=" * 50)
     print()
