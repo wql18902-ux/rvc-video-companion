@@ -127,6 +127,21 @@ chmod +x "$APP/Contents/MacOS/rvc-server"
 # onedir 的 _internal 内容平铺进 Frameworks；其中 Python -> Python.framework/Versions/3.14/Python 的
 # symlink 由 cp -R 原样保留，bootloader 据此 dlopen Frameworks/Python。
 cp -R "$BUILD_DIR/dist/rvc-server/_internal/." "$APP/Contents/Frameworks/"
+# 官方布局：纯数据文件（非二进制）从 Frameworks 移入 Resources，Frameworks 留符号链接交叉。
+# 原因：codesign 会把 Frameworks 下所有文件当"代码"要求签名，数据文件混在其中
+# 导致签名不完整 → Gatekeeper 报「已损坏」（死路）。移走+软链后既能签名又能保持
+# sys._MEIPASS(=Contents/Frameworks) 路径解析不变。
+# 注意：python3.14 是 Mach-O 代码（非纯数据），不能移动——dyld 按 realpath 解析
+# @loader_path，移动后 lib-dynload/*.so 的 LC_RPATH 找不到 libssl/libcrypto 等 → 运行时崩溃。
+# 它留在 Frameworks，由下方 step1 逐 .so 签名即可。
+mkdir -p "$APP/Contents/Resources"
+for f in player.html mpegts.min.js base_library.zip; do
+  if [ -e "$APP/Contents/Frameworks/$f" ]; then
+    mv "$APP/Contents/Frameworks/$f" "$APP/Contents/Resources/$f"
+    ln -s "../Resources/$f" "$APP/Contents/Frameworks/$f"
+    echo "    数据文件移至 Resources：$f（Frameworks 留软链）"
+  fi
+done
 # Resources 侧放数据文件（图标等），并交叉链接 _internal 供规范布局
 if [ -f "$BUILD_DIR/rvc.icns" ]; then
   cp "$BUILD_DIR/rvc.icns" "$APP/Contents/Resources/rvc.icns"
@@ -156,6 +171,41 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 </dict>
 </plist>
 EOF
+
+echo "==> [5/5] 分步 ad-hoc 签名（官方布局，目标：Gatekeeper 可绕过而非「已损坏」）"
+# 签名顺序（由内向外）：1) 所有独立 Mach-O（跳过 .framework 主二进制，失败不中断）
+# 2) .framework 目录 3) 主可执行（带官方 bundle identifier）4) 外层 .app（不带 --deep）
+cd "$APP"
+find . -type f | while read f; do
+  file "$f" | grep -q Mach-O || continue
+  case "$f" in */Python.framework/*) continue;; esac
+  codesign --force -s - "$f" || true
+done
+echo "    [1/4] 独立 Mach-O 签名完成"
+find . -name '*.framework' -type d | sort -r | while read fw; do
+  codesign --force -s - "$fw" || echo "    [WARN] $fw 签名跳过（非致命）"
+done
+echo "    [2/4] framework 签名完成"
+codesign --force -s - --identifier com.rvc.stream-server Contents/MacOS/rvc-server
+echo "    [3/4] 主可执行签名完成"
+codesign --force -s - .
+echo "    [4/4] 外层 .app 签名完成"
+
+# 验收：签名全绿 + Gatekeeper 可绕过判定
+echo ""
+echo "  ---- 签名验收 ----"
+if codesign --verify --deep --strict . 2>&1; then
+  echo "  [OK] codesign --verify --deep --strict 通过"
+else
+  echo "  [FAIL] codesign 验证未通过（见上方输出）"
+  exit 1
+fi
+if spctl -a -vv --type execute . 2>&1 | grep -q "rejected"; then
+  echo "  [OK] spctl=rejected → 可「右键打开→仍要打开」绕过"
+else
+  echo "  [WARN] spctl 状态异常（见上方输出），请人工核验双击体验"
+fi
+echo "=============================================="
 
 echo ""
 echo "=============================================="
