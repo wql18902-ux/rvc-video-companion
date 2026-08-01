@@ -359,12 +359,15 @@
   }
 
   // ========== 文件夹浮层 ==========
-  function showFolderOverlay() {
+  async function showFolderOverlay() {
     // SPA 页面重建 DOM 时 overlay 可能被移除，重新挂载到 body
     if (!document.body.contains(folderOverlay)) {
       document.body.appendChild(folderOverlay);
     }
     folderOverlay.style.display = 'flex';
+    // 等待 storage 恢复固定目录/上次目录后再渲染 chips，避免空列表竞态 (B9)
+    // overlay 已先显示（即时反馈），chips 在 storageReady 后补齐
+    await storageReady;
     renderPinnedChips();
     // 不自动 loadFileList：避免覆盖用户 fill 的路径（race condition）
     // 用户点"刷新"或 fill 后回车才 loadFileList
