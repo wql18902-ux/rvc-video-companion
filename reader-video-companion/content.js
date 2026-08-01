@@ -42,6 +42,9 @@
     isResizing: false,
     resizeStart: { x: 0, y: 0, width: 0, height: 0, left: 0, top: 0 },
     player: null,           // mpegts.js 播放器实例
+    currentReqId: null,     // 当前转码请求 ID（时间戳+随机），服务器据此命名日志、供错误查询
+    transcodeTimer: null,        // 转码 loading 超时兜底定时器
+    transcodeErrorShown: false,  // 错误已展示（mpegts ERROR / video error / 超时 三路去重）
     serverOnline: false,
     currentFile: null,
     pinnedDirs: [],         // 固定目录列表（LRU，最前为最近使用，上限 8）
@@ -830,6 +833,13 @@
     elements.resizeHandles.forEach(h => h.style.display = 'block');
     player.classList.remove('rvc-empty');
     showLoading();
+    removeTranscodeError();
+    state.transcodeErrorShown = false;
+    if (state.transcodeTimer) {
+      clearTimeout(state.transcodeTimer);
+      state.transcodeTimer = null;
+    }
+    elements.video.onerror = null;   // 清掉旧文件的 video 错误处理，避免跨文件误报
 
     // 销毁旧播放器
     if (state.player) {
@@ -843,6 +853,7 @@
     const ext = (filename.split('.').pop() || '').toLowerCase();
 
     if (['mp4', 'm4v', 'webm'].includes(ext)) {
+      state.currentReqId = null;   // 原生直发不走转码通道
       elements.video.src = SERVER + '/api/file?file=' + encodeURIComponent(filename) + '&dir=' + encodeURIComponent(dir);
       finishLoad(filename, dir);
       return;
@@ -850,7 +861,10 @@
 
     // 转码播放
     if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-      const streamUrl = SERVER + '/api/stream?file=' + encodeURIComponent(filename) + '&dir=' + encodeURIComponent(dir);
+      // 请求关联 ID（时间戳+随机）：服务器用它命名转码日志，错误回调凭它查询结构化错误
+      const reqId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      state.currentReqId = reqId;
+      const streamUrl = SERVER + '/api/stream?file=' + encodeURIComponent(filename) + '&dir=' + encodeURIComponent(dir) + '&req=' + reqId;
       state.player = mpegts.createPlayer({
         type: 'mpegts',
         url: streamUrl,
@@ -863,8 +877,26 @@
 
       state.player.on(mpegts.Events.ERROR, (errType, errDetail) => {
         hideLoading();
-        console.error('RVC mpegts error:', errType, errDetail);
+        if (state.currentReqId !== reqId) return;   // 已被新请求顶替，忽略旧请求的错误
+        console.error('RVC mpegts error:', errType, errDetail, 'req=' + reqId);
+        fetchTranscodeError(reqId, errType);
       });
+
+      // 兜底 1：video 元素报错（如流不可解码）也走同一错误查询通道
+      elements.video.onerror = () => {
+        if (state.currentReqId !== reqId) return;
+        hideLoading();
+        console.error('RVC video error:', elements.video.error ? elements.video.error.code : 'unknown', 'req=' + reqId);
+        fetchTranscodeError(reqId, 'TRANSCODE_FAILED');
+      };
+
+      // 兜底 2：转码 15s 无进展（空流等 mpegts 不报错场景）时主动查询错误
+      state.transcodeTimer = setTimeout(() => {
+        if (state.currentReqId !== reqId || state.isPlaying) return;
+        hideLoading();
+        console.warn('RVC transcode timeout, req=' + reqId);
+        fetchTranscodeError(reqId, 'TRANSCODE_FAILED');
+      }, 15000);
 
       state.player.attachMediaElement(elements.video);
       state.player.load();
@@ -878,6 +910,10 @@
   function finishLoad(filename, dir) {
     const onPlaying = () => {
       hideLoading();
+      if (state.transcodeTimer) {
+        clearTimeout(state.transcodeTimer);
+        state.transcodeTimer = null;
+      }
       state.isPlaying = true;
       updatePlayButton();
       elements.video.removeEventListener('playing', onPlaying);
@@ -912,6 +948,52 @@
       });
     });
     if (!persistent) setTimeout(() => hint.remove(), 5000);
+  }
+
+  // ========== 转码错误：透传服务器结构化错误码 + 用户可读提示 ==========
+  function fetchTranscodeError(reqId, fallbackType) {
+    if (state.transcodeErrorShown) return;   // mpegts ERROR / video error / 超时三路触发去重
+    // 服务器在 ffmpeg 退出后才写入结果，错误回调可能略早于落盘，重试几次兜底
+    const tryFetch = (attempt) => {
+      fetch(SERVER + '/api/stream-error?req=' + encodeURIComponent(reqId))
+        .then(r => r.json())
+        .then(d => {
+          if (d && d.ok && d.code) {
+            showTranscodeError(reqId, d.code, d.message, d.log);
+          } else if (attempt < 5) {
+            setTimeout(() => tryFetch(attempt + 1), 400);
+          } else {
+            showTranscodeError(reqId, fallbackType || 'TRANSCODE_FAILED', '转码失败，请重试', '');
+          }
+        })
+        .catch(() => {
+          if (attempt < 5) setTimeout(() => tryFetch(attempt + 1), 400);
+          else showTranscodeError(reqId, fallbackType || 'TRANSCODE_FAILED', '转码失败，请重试', '');
+        });
+    };
+    tryFetch(0);
+  }
+
+  function showTranscodeError(reqId, code, message, log) {
+    state.transcodeErrorShown = true;
+    console.error('[RVC] transcode failed: ' + code + ' - ' + message + (log ? ' (log: ' + log + ')' : '') + ' (req: ' + reqId + ')');
+    removeTranscodeError();
+    const hint = elements.body.querySelector('.rvc-play-hint');
+    if (hint) hint.remove();
+    const banner = document.createElement('div');
+    banner.className = 'rvc-transcode-error';
+    banner.innerHTML = ICON.alert + ' <span class="rvc-err-msg">' + escapeHtml(message) +
+      '</span> <span class="rvc-err-code">[' + escapeHtml(code) + ']</span>' +
+      '<button class="rvc-err-close" title="关闭">' + ICON.close + '</button>';
+    banner.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(160,40,40,0.95);color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:6;max-width:85%;text-align:center;display:flex;align-items:center;gap:8px;';
+    banner.querySelector('.rvc-err-close').addEventListener('click', () => banner.remove());
+    banner.dataset.req = reqId;   // 请求关联 ID，便于排查与测试断言
+    elements.body.appendChild(banner);
+  }
+
+  function removeTranscodeError() {
+    const el = elements.body.querySelector('.rvc-transcode-error');
+    if (el) el.remove();
   }
 
   // ========== 按钮事件 ==========

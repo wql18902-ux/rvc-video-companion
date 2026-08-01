@@ -340,7 +340,9 @@ async function playFile(filename, item) {
     }
   } catch (e) {}
 
-  const streamUrl = '/api/stream?file=' + encodeURIComponent(filename) + '&dir=' + dir;
+  // 请求关联 ID（时间戳+随机）：服务器用它命名转码日志，错误回调凭它查询结构化错误
+  const reqId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  const streamUrl = '/api/stream?file=' + encodeURIComponent(filename) + '&dir=' + dir + '&req=' + reqId;
 
   if (mpegts.isSupported()) {
     player = mpegts.createPlayer({
@@ -356,7 +358,21 @@ async function playFile(filename, item) {
     player.on(mpegts.Events.ERROR, (errType, errDetail) => {
       loadingOverlay.style.display = 'none';
       setStatus('', '错误: ' + errDetail);
-      console.error('mpegts error:', errType, errDetail);
+      console.error('mpegts error:', errType, errDetail, 'req=' + reqId);
+      // 透传服务器结构化错误码 + 用户可读提示（ffmpeg 退出后即可查到，重试兜底）
+      const tryFetch = (attempt) => {
+        fetch('/api/stream-error?req=' + encodeURIComponent(reqId))
+          .then(r => r.json())
+          .then(d => {
+            if (d && d.ok && d.code) {
+              setStatus('', '错误[' + d.code + '] ' + d.message);
+            } else if (attempt < 5) {
+              setTimeout(() => tryFetch(attempt + 1), 400);
+            }
+          })
+          .catch(() => { if (attempt < 5) setTimeout(() => tryFetch(attempt + 1), 400); });
+      };
+      tryFetch(0);
     });
 
     player.attachMediaElement(video);

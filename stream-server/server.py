@@ -15,6 +15,7 @@ import threading
 import signal
 import sys
 import queue
+import re
 import time
 import datetime
 
@@ -22,17 +23,43 @@ PORT = 8765
 DEFAULT_DIR = os.path.expanduser("~/Downloads")
 VIDEO_EXTS = {'.mkv', '.mov', '.avi', '.flv', '.webm', '.mp4', '.m4v'}
 
-# 鉴权白名单：扩展注入页面 + 本地测试页 + 扩展自身（background 发请求时 Origin 为 chrome-extension://）
+# 鉴权白名单（Origin 精确匹配，无通配/前缀）：
+#  - 播放器注入页面：aim-read.top（http/https）+ 本地测试页 127.0.0.1:8899
+#  - 扩展自身页面（background/popup 等 fetch 本地 server 时 Origin 为 chrome-extension://<id>）：
+#    CRX 打包版扩展 ID（由 packaging/rvc-key.pem 派生，见 packaging/build-crx.sh）
+#    开发者模式加载时 ID 不同，需在 chrome://extensions 查看后手动加入本集合
 ALLOWED_ORIGINS = {
     'https://aim-read.top',
     'http://aim-read.top',
     'http://127.0.0.1:8899',
+    'chrome-extension://ojddpeamckomnllokngoghkdocijghhj',
 }
 ALLOWED_HOSTS = {'127.0.0.1:8765', 'localhost:8765'}
 # serve_file（原生直发）只允许浏览器可直播的扩展名
 SERVE_FILE_EXTS = {'.mp4', '.m4v', '.webm'}
 # SSE 最大并发连接数（防线程耗尽，每连接占一线程）
 MAX_SSE_CLIENTS = 10
+
+# 转码日志目录：每次 ffmpeg 请求的 stderr 落盘为 transcode-<req_id>.log
+# （req_id 由播放端生成：时间戳+随机，天然按时间与请求关联，便于排查）
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+
+# 结构化转码错误码 -> 用户可读提示（播放端 /api/stream-error 透传）
+TRANSCODE_ERROR_MSGS = {
+    'FFMPEG_NOT_FOUND': '未找到 ffmpeg，请先安装：brew install ffmpeg',
+    'FFMPEG_SPAWN_FAILED': 'ffmpeg 启动失败，请重试',
+    'INVALID_DATA': '视频文件已损坏或不是有效的媒体文件',
+    'UNSUPPORTED_CODEC': '视频/音频编码不受支持，无法转码',
+    'FILE_READ_ERROR': '无法读取视频文件，请检查文件是否存在且有读取权限',
+    'TRANSCODE_FAILED': '转码失败，请查看服务器日志（stream-server/logs/）',
+    'STREAM_ABORTED': '播放已停止或已切换',
+}
+
+# 转码结果缓存：req_id -> {'code','message','log'}，供播放端 /api/stream-error 查询
+# （ffmpeg 退出后才能写入，故错误回调可能先到，播放端需重试）
+transcode_results = {}
+transcode_lock = threading.Lock()
+TRANSCODE_RESULT_MAX = 100
 
 
 def find_ffmpeg_bin():
@@ -162,13 +189,76 @@ def kill_current_proc():
             current_proc = None
 
 
+def parse_transcode_error(stderr_text, returncode):
+    """把 ffmpeg 的退出码与 stderr 尾部映射为结构化错误码（可读提示见 TRANSCODE_ERROR_MSGS）。
+    返回 (code, message)；转码正常结束返回 None。"""
+    if returncode == 0:
+        return None
+    if returncode is not None and returncode < 0:
+        # 被信号终止（用户切换/停止时主动 kill），不算转码错误
+        return ('STREAM_ABORTED', TRANSCODE_ERROR_MSGS['STREAM_ABORTED'])
+    text = stderr_text or ''
+    if 'Invalid data found when processing input' in text:
+        return ('INVALID_DATA', TRANSCODE_ERROR_MSGS['INVALID_DATA'])
+    low = text.lower()
+    if ('Could not find codec parameters' in text
+            or ('codec' in low and 'not found' in low)
+            or ('codec' in low and 'unsupported' in low)
+            or 'codec not supported' in low):
+        return ('UNSUPPORTED_CODEC', TRANSCODE_ERROR_MSGS['UNSUPPORTED_CODEC'])
+    if 'No such file or directory' in text or 'Permission denied' in text:
+        return ('FILE_READ_ERROR', TRANSCODE_ERROR_MSGS['FILE_READ_ERROR'])
+    return ('TRANSCODE_FAILED', TRANSCODE_ERROR_MSGS['TRANSCODE_FAILED'])
+
+
+def store_transcode_result(req_id, code, log_name):
+    """记录一次转码请求的最终状态（供播放端 /api/stream-error 查询）"""
+    with transcode_lock:
+        transcode_results[req_id] = {
+            'code': code,
+            'message': TRANSCODE_ERROR_MSGS.get(code, ''),
+            'log': log_name or '',
+        }
+        # 只保留最近 N 条，防内存膨胀
+        while len(transcode_results) > TRANSCODE_RESULT_MAX:
+            transcode_results.pop(next(iter(transcode_results)))
+
+
+def read_tail(path, max_bytes=8192):
+    """读取文件尾部（ffmpeg stderr 日志），文件不存在返回空串"""
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            return f.read().decode('utf-8', errors='replace')
+    except OSError:
+        return ''
+
+
+def cleanup_transcode_logs(days=7):
+    """启动时清理过期转码日志，防止 logs/ 无限膨胀"""
+    if not os.path.isdir(LOG_DIR):
+        return
+    cutoff = time.time() - days * 86400
+    for name in os.listdir(LOG_DIR):
+        if not (name.startswith('transcode-') and name.endswith('.log')):
+            continue
+        p = os.path.join(LOG_DIR, name)
+        try:
+            if os.path.getmtime(p) < cutoff:
+                os.remove(p)
+        except OSError:
+            pass
+
+
 class StreamHandler(http.server.BaseHTTPRequestHandler):
     def check_origin(self):
-        """鉴权：有 Origin 头必须命中白名单；无 Origin（热键子进程/本地 curl）校验 Host。
+        """鉴权：有 Origin 头必须精确命中白名单；无 Origin（热键子进程/本地 curl）校验 Host。
         返回 True 放行，False 拒绝。"""
         origin = self.headers.get('Origin')
         if origin:
-            return origin in ALLOWED_ORIGINS or origin.startswith('chrome-extension://')
+            return origin in ALLOWED_ORIGINS
         host = self.headers.get('Host', '')
         return host in ALLOWED_HOSTS
 
@@ -204,6 +294,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             self.serve_file(params)
         elif path == '/api/stream':
             self.serve_stream(params)
+        elif path == '/api/stream-error':
+            self.serve_stream_error(params)
         elif path == '/api/duration':
             self.serve_duration(params)
         elif path == '/api/control':
@@ -248,9 +340,10 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def _cors_header(self):
-        """CORS 白名单回显：仅对命中白名单的 Origin 回显；无 Origin（本地进程）不加头"""
+        """CORS 白名单回显：仅对精确命中白名单的 Origin 回显；
+        白名单外/无 Origin（本地进程）一律不加跨域头"""
         origin = self.headers.get('Origin')
-        if origin and (origin in ALLOWED_ORIGINS or origin.startswith('chrome-extension://')):
+        if origin and origin in ALLOWED_ORIGINS:
             self.send_header('Access-Control-Allow-Origin', origin)
 
     def serve_html(self, filename):
@@ -510,12 +603,46 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
                 if client_q in control_clients:
                     control_clients.remove(client_q)
 
+    def serve_stream_error(self, params):
+        """查询一次转码请求的最终结果：结构化错误码 + 用户可读提示 + 日志文件名。
+        播放端在 mpegts 错误回调中调用（ffmpeg 退出后结果才就绪，播放端需重试）。"""
+        req_id = params.get('req', [''])[0]
+        with transcode_lock:
+            result = transcode_results.get(req_id)
+        if not result:
+            self.send_json({'ok': False, 'error': 'unknown request'})
+            return
+        self.send_json({'ok': True, **result})
+
+    def send_transcode_error(self, req_id, code, message, log_name):
+        """转码在流开始前即失败（spawn 失败或 250ms 内退出）：发 500 JSON 替代 200 空流。
+        播放端 mpegts 对非 2xx 必触发 ERROR，再凭 req_id 查 /api/stream-error 拿提示。"""
+        self.send_response(500)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self._cors_header()
+        self.send_header('X-RVC-Request-Id', req_id)
+        self.end_headers()
+        try:
+            body = json.dumps({'ok': False, 'code': code, 'message': message, 'log': log_name}).encode('utf-8')
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def serve_stream(self, params):
-        """启动 ffmpeg 实时转码，流式输出 MPEG-TS"""
+        """启动 ffmpeg 实时转码，流式输出 MPEG-TS。
+        stderr 落盘为 logs/transcode-<req>.log（req 由播放端生成：时间戳+随机，
+        按时间与请求一一关联）；ffmpeg 退出后解析出结构化错误码，供
+        /api/stream-error 查询，播放端据此展示可读提示。"""
         global current_proc
         file_path = params.get('file', [''])[0]
         dir_path = params.get('dir', [DEFAULT_DIR])[0]
         start = params.get('start', ['0'])[0]
+
+        # 请求关联 ID：播放端生成（时间戳+随机），用于日志命名与错误查询；
+        # 非法/缺失时服务器自行生成，保证日志可追溯
+        req_id = params.get('req', [''])[0]
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', req_id or ''):
+            req_id = '%d-%d' % (int(time.time() * 1000), os.getpid())
 
         base, full_path = self.safe_join(dir_path, file_path)
         if full_path is None:
@@ -529,12 +656,15 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         # 终止旧进程
         kill_current_proc()
 
-        # 允许 CORS（白名单 Origin 回显）
-        self.send_response(200)
-        self.send_header('Content-Type', 'video/mp2t')
-        self.send_header('Cache-Control', 'no-cache, no-store')
-        self._cors_header()
-        self.end_headers()
+        # 转码日志：logs/transcode-<req>.log（同名重复请求追加序号，避免覆盖）
+        os.makedirs(LOG_DIR, exist_ok=True)
+        log_name = 'transcode-%s.log' % req_id
+        log_path = os.path.join(LOG_DIR, log_name)
+        n = 1
+        while os.path.exists(log_path):
+            log_name = 'transcode-%s-%d.log' % (req_id, n)
+            log_path = os.path.join(LOG_DIR, log_name)
+            n += 1
 
         # 构建 ffmpeg 命令
         cmd = [ffmpeg_cmd('ffmpeg')]
@@ -554,21 +684,64 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         ])
         cmd.append('pipe:1')
 
+        # 启动 ffmpeg：stderr 直写日志文件（错误输出落盘，不再 DEVNULL 丢弃）
         try:
             with proc_lock:
-                current_proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL
-                )
-        except Exception as e:
-            self.log_message(f"ffmpeg 启动失败: {e}")
+                logf = open(log_path, 'ab')
+                try:
+                    current_proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=logf
+                    )
+                except Exception:
+                    logf.close()
+                    raise
+                logf.close()   # 子进程已持有 dup 的 stderr fd，父进程可立即关闭
+            proc_ref = current_proc
+        except FileNotFoundError:
+            with open(log_path, 'a') as f:
+                f.write('[spawn] ffmpeg 可执行文件未找到\n')
+            store_transcode_result(req_id, 'FFMPEG_NOT_FOUND', log_name)
+            self.log_message(f"ffmpeg 未找到: {cmd}")
+            self.send_transcode_error(req_id, 'FFMPEG_NOT_FOUND',
+                                      TRANSCODE_ERROR_MSGS['FFMPEG_NOT_FOUND'], log_name)
             return
+        except Exception as e:
+            with open(log_path, 'a') as f:
+                f.write('[spawn] ffmpeg 启动失败: %s\n' % e)
+            store_transcode_result(req_id, 'FFMPEG_SPAWN_FAILED', log_name)
+            self.log_message(f"ffmpeg 启动失败: {e}")
+            self.send_transcode_error(req_id, 'FFMPEG_SPAWN_FAILED',
+                                      TRANSCODE_ERROR_MSGS['FFMPEG_SPAWN_FAILED'], log_name)
+            return
+
+        # 秒挂探测：ffmpeg 若在 250ms 内退出（坏文件/缺编码器等立即失败），
+        # 改发 500 JSON 而非 200 空流——mpegts 收到非 2xx 必触发 ERROR 回调
+        rc = proc_ref.poll()
+        if rc is None:
+            time.sleep(0.25)
+            rc = proc_ref.poll()
+        if rc is not None:
+            err = parse_transcode_error(read_tail(log_path), rc)
+            store_transcode_result(req_id, err[0] if err else None, log_name)
+            if err:
+                self.log_message(f"转码立即失败 [{err[0]}]: {full_path}")
+                self.send_transcode_error(req_id, err[0], err[1], log_name)
+                return
+
+        # 允许 CORS（白名单 Origin 回显）
+        self.send_response(200)
+        self.send_header('Content-Type', 'video/mp2t')
+        self.send_header('Cache-Control', 'no-cache, no-store')
+        self.send_header('X-RVC-Request-Id', req_id)   # 请求关联 ID，便于日志排查
+        self._cors_header()
+        self.end_headers()
 
         # 流式转发
         try:
             while True:
-                chunk = current_proc.stdout.read(65536)
+                chunk = proc_ref.stdout.read(65536)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
@@ -580,6 +753,13 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             pass
         finally:
             kill_current_proc()
+            # ffmpeg 已退出：取退出码 + 读 stderr 日志尾部，解析为结构化错误码
+            try:
+                rc = proc_ref.wait(timeout=5)
+            except Exception:
+                rc = None
+            err = parse_transcode_error(read_tail(log_path), rc)
+            store_transcode_result(req_id, err[0] if err else None, log_name)
 
     def log_message(self, format, *args):
         # 简化日志，只打印非静态资源请求
@@ -626,6 +806,9 @@ if __name__ == '__main__':
         print(f"  lsof -ti:{PORT} | xargs kill")
         print()
         sys.exit(0)
+
+    # 启动前清理过期转码日志（保留 7 天）
+    cleanup_transcode_logs()
 
     server = ThreadedHTTPServer(('127.0.0.1', PORT), StreamHandler)
     print("=" * 50)
