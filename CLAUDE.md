@@ -39,11 +39,10 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 aiohttp 服务器 / ffmpeg+ffprobe /
 
 ## 当前状态
 
-v3.2.0 + 访达选目录 + 自定义按键面板（keys-panel，已恢复）。播放列表已回退。
-- **2026-08-01 根因查明**：打包版「浏览」无反应的真凶 = pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL，服务器启动数秒即死、全功能瘫痪；adhoc 签名按二进制哈希记权限，重打包即失效。此前 NSOpenPanel↔osascript 两轮改动均未触根因。
-- **已修复（2026-08-01，commit 24b44ad）**：热键拆独立子进程（`--hotkey-child`，主进程不被 SIGKILL 拖死）/ pick-folder 单段 AppleScript 前置 + stderr 分流报错 / build.sh venv 装 pynput / 安装说明加授权指引。验收 12/12，.app 与 zip 已重建（13:06/13:08）。前置 frontmost 机器半验受限见 BLOCKED B13 待领导亲验。
-- server.py 用 `libx264 -preset fast -crf 23`（h264_videotoolbox 已回滚，用户确认 libx264 可正常看）
-- content.js 无框模式等比缩放（state.videoRatio）；拖拽角标 hover 圆点；keys-panel 用 state.keybindings + chrome.storage.local 持久化
-- 打包版 .app 与 zip（Aug 1 11:25/11:27 构建）**含旧缺陷**：无输入监控权限启动数秒即死，且是 keys-panel 删除版——任务书执行完必须重建才可用
-- 运行态实测（2026-08-01）：双击 .app **无终端窗口**（后台运行），重复双击无副作用（L550 端口检测后退出）；停止方法 `lsof -ti:8765 | xargs kill`
-- fixed 定位重构（v3.2.1）已回滚——用户验证 sticky 打包版无问题
+v3.2.2（2026-08-01 发布，GitHub Release v3.2.2 + commit a9ddf27）。播放列表已回退。
+- **核心配置**：player.css 用 `position: sticky + float:right`（fixed 已回滚，违反硬约束）；server.py pick-folder 用 `activate me`（纯 Standard Additions，无自动化权限）；server.py 编码器 `libx264 -preset fast -crf 23`（h264_videotoolbox 已回滚）；content.js keys-panel 已恢复（state.keybindings + chrome.storage.local）
+- **v3.2.2 改动**：fixed→sticky 回滚修复挤压正文 / System Events→activate me 修复 -1743 权限错误 / 恢复 keys-panel / README 加「方式零：让 AI Agent 帮你装」章节
+- **打包版**：.app 与 zip（Aug 1 18:01 重建）是最新版，含上述全部修复。Release: https://github.com/wql18902-ux/rvc-video-companion/releases/tag/v3.2.2
+- **历史根因（保留备查）**：pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL。已拆 `--hotkey-child` 子进程隔离。每次重打包 .app 后输入监控权限失效（adhoc 签名按二进制哈希记账），需重新授权
+- 运行态：双击 .app **无终端窗口**（后台运行），重复双击无副作用（端口检测后退出）；停止 `lsof -ti:8765 | xargs kill`
+- git push 受全局 7890 代理影响，代理未开时用 `git -c http.proxy= -c https.proxy= push origin main` 临时绕过
