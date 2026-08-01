@@ -143,9 +143,31 @@ for f in player.html mpegts.min.js base_library.zip; do
   if [ -e "$APP/Contents/Frameworks/$f" ]; then
     mv "$APP/Contents/Frameworks/$f" "$APP/Contents/Resources/$f"
     ln -s "../Resources/$f" "$APP/Contents/Frameworks/$f"
-    echo "    数据文件移至 Resources：$f（Frameworks 留软链）"
+    echo "    数据文件移至 Resources：${f}（Frameworks 留软链）"
   fi
 done
+# python3.14 补 framework 结构：codesign 把 Frameworks/ 下任何目录都当 framework
+# 子包处理，python3.14 光秃秃（无 Versions/Info.plist）→ "bundle format unrecognized"
+# 补 Versions/3.14/Resources/Info.plist + 顶层 symlink，**lib-dynload 留原位**（保 @loader_path
+# 不变，dlopen libssl 不崩）。Python sys.path 找的是 python3.14/lib-dynload，不碰。
+PYDIR="$APP/Contents/Frameworks/python3.14"
+if [ -d "$PYDIR" ] && [ ! -d "$PYDIR/Versions/3.14" ]; then
+  mkdir -p "$PYDIR/Versions/3.14/Resources"
+  cat > "$PYDIR/Versions/3.14/Resources/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Python</string>
+  <key>CFBundleIdentifier</key><string>org.python.python3.14</string>
+  <key>CFBundleVersion</key><string>3.14</string>
+  <key>CFBundlePackageType</key><string>FMWK</string>
+</dict>
+</plist>
+EOF
+  [ -L "$PYDIR/Resources" ] || ln -s Versions/3.14/Resources "$PYDIR/Resources"
+  echo "    python3.14 framework 结构补全（lib-dynload 留原位）"
+fi
 # Resources 侧放数据文件（图标等），并交叉链接 _internal 供规范布局
 if [ -f "$BUILD_DIR/rvc.icns" ]; then
   cp "$BUILD_DIR/rvc.icns" "$APP/Contents/Resources/rvc.icns"
@@ -189,6 +211,11 @@ echo "    [1/4] 独立 Mach-O 签名完成"
 find . -name '*.framework' -type d | sort -r | while read fw; do
   codesign --force -s - "$fw" || echo "    [WARN] $fw 签名跳过（非致命）"
 done
+# python3.14 不是 .framework 后缀但被 codesign 当 framework 子包处理，必须显式签
+if [ -d "Contents/Frameworks/python3.14" ]; then
+  codesign --force -s - Contents/Frameworks/python3.14 2>&1 | grep -v "replacing existing signature" || true
+  echo "    python3.14 bundle 签名完成"
+fi
 echo "    [2/4] framework 签名完成"
 codesign --force -s - --identifier com.rvc.stream-server Contents/MacOS/rvc-server
 echo "    [3/4] 主可执行签名完成"

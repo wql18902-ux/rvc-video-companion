@@ -45,6 +45,7 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 aiohttp 服务器 / ffmpeg+ffprobe /
 
 - 判卷基准 sha256 冻结（范围收窄到三文件，防漂移）：acceptance.py=c1965638… / test.html=4b79893e… / sample.mp4=9b4a8281…，碰都不许碰（run_tests.sh L0 核对）；实现文件不再哈希冻结，靠分层测试验证行为
 - server.py/start.sh 不许含 emoji（已清理，保持文字标签 [WARN]/[OK]/[INFO] 等）
+- **软件名 / 资产名一律英文**：项目名、.app 名、zip 名、GitHub Release asset 名、CLI 参数名等全程用 ASCII 英文，禁止中文。中文名不稳定：GitHub 会把 `RVC视频伴侣.zip` 剥成 `RVC.zip`、macOS 路径含中文易踩 xattr/codesign 坑、跨平台脚本传参易乱码。对内可叫中文品牌「RVC 视频伴侣」，但**文件名 / asset 名 / 标识符**一律英文（如 `RVC-Video-Companion.zip`）
 - 改完先过检查再提交（v3.0.0 曾四天未提交丢失教训）：本地钩子强制 pre-commit 静态检查 + pre-push 全量验收，检查通过才允许提交/推送（见「检查与回滚」）
 
 ## 检查与回滚（进入主干的唯一通路）
@@ -63,4 +64,9 @@ v3.2.2（2026-08-01 发布，GitHub Release v3.2.2 + commit dea5ef6）。播放�
 - **打包版**：dist 的 .app/zip 仍是 18:58 旧版（含已删除的 .command），**需重建**（跑 build.sh + make-distro.sh）才含本次整顿。Release asset 名 `RVC-Video-Companion.zip`（GitHub 不支持中文 asset 名）。Release: https://github.com/wql18902-ux/rvc-video-companion/releases/tag/v3.2.2
 - **历史根因（保留备查）**：pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL。已拆 `--hotkey-child` 子进程隔离。每次重打包 .app 后输入监控权限失效（adhoc 签名按二进制哈希记账），需重新授权
 - 运行态：双击 .app **无终端窗口**（后台运行），重复双击无副作用（端口检测后退出）；停止 `lsof -ti:8765 | xargs kill`
-- git push 受全局 7890 代理影响，代理未开时用 `git -c http.proxy= -c https.proxy= push origin main` 临时绕过
+- git push 代理三态规则（2026-08-02 实测卡点链复盘）：
+  - 代理未开：`git -c http.proxy= -c https.proxy= push origin main`（清空代理直连）
+  - 代理已开（7890）：`NO_PROXY=127.0.0.1,localhost git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push origin main`
+  - ⚠️ **禁止用 `HTTPS_PROXY=...` env 推送**：env 会泄漏进 pre-push 钩子的 acceptance.py 子进程，urllib 把 `127.0.0.1:8765` localhost 探活也送进代理 → 误判 "server 未运行" → 验收挂。给 git 设代理只走 `git -c http.proxy=`（不进子进程 env）
+  - `gh` CLI **不走** git 全局 `http.proxy`，只认 `HTTPS_PROXY/HTTP_PROXY/ALL_PROXY` env；代理环境下 `gh auth refresh`/`gh api` 要显式带 env
+  - 推送含 `.github/workflows/*` 的 commit：gh token 必须带 `workflow` scope（仅 `repo` 会被远端拒）；缺时跑 `HTTPS_PROXY=http://127.0.0.1:7890 gh auth refresh -h github.com -s workflow`（设备流程，需 TTY，agent 内后台跑不出验证码，让用户在终端跑或前台跑等浏览器授权）
