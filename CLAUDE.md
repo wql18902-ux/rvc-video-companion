@@ -16,6 +16,10 @@ bash stream-server/start.sh
 rm -rf /tmp/rvc-pw-profile-accept
 env -u PYTHONHOME -u PYTHONPATH /opt/homebrew/bin/python3 tests/acceptance.py
 
+# 分层测试（改动常规验证：L0 哈希/静态 + L1 单测 + L2 真实进程 E2E）
+bash run_tests.sh            # L0+L1+L2（默认）
+bash run_tests.sh --full     # 加 L3 验收（进主干前必跑）
+
 # 统一检查（静态 + 验收，进主干的唯一通路，详见「检查与回滚」）
 bash scripts/check.sh --static   # 秒级静态检查
 bash scripts/check.sh            # 全量：静态 + 验收
@@ -32,13 +36,13 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 aiohttp 服务器 / ffmpeg+ffprobe /
 
 - `reader-video-companion/` — 唯一维护的扩展（content.js/player.css/background.js/manifest.json）
 - `stream-server/` — 本地服务器（server.py/start.sh）
-- `tests/` — 验收脚本 acceptance.py + fixtures/；**根目录 `test.html`** — 验收测试页；三者 **sha256 冻结，不许改**（注意 test.html 在根目录，不在 tests/ 内）
+- `tests/` — 分层测试：验收脚本 acceptance.py + fixtures/ + L1 单测 test_server_api.py + L2 真实进程 e2e_extra.py；**根目录 `test.html`** — 验收测试页；三者 **sha256 冻结，不许改**（注意 test.html 在根目录，不在 tests/ 内）。哈希冻结范围只覆盖判卷基准三文件（acceptance.py/test.html/sample.mp4），content.js/player.css/server.py 等实现文件不受哈希约束，由 run_tests.sh 分层行为验证覆盖
 - `packaging/` — 打包脚本（make-distro.sh / build-crx.sh）
 - `PROGRESS.md` 现役状态真相源；`BLOCKED.md` 待决项；`iterations/history.md` 版本记录
 
 ## 硬约束
 
-- 验收脚本 sha256 冻结：acceptance.py=c1965638… / test.html=4b79893e…，碰都不许碰
+- 判卷基准 sha256 冻结（范围收窄到三文件，防漂移）：acceptance.py=c1965638… / test.html=4b79893e… / sample.mp4=9b4a8281…，碰都不许碰（run_tests.sh L0 核对）；实现文件不再哈希冻结，靠分层测试验证行为
 - server.py/start.sh 不许含 emoji（已清理，保持文字标签 [WARN]/[OK]/[INFO] 等）
 - 改完先过检查再提交（v3.0.0 曾四天未提交丢失教训）：本地钩子强制 pre-commit 静态检查 + pre-push 全量验收，检查通过才允许提交/推送（见「检查与回滚」）
 

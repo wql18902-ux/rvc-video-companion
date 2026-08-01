@@ -1,6 +1,55 @@
 # PROGRESS - Reader 视频伴侣（浏览器播放器系统）
 
-> 更新：2026-08-01 本地钩子检查闸门——静态+验收成为进入主干的唯一通路，推送 main 前必须通过。
+> 更新：2026-08-01 哈希冻结收窄到判卷基准 + 分层测试覆盖负向路径（转码失败/端口占用/播放中断）+ 变更→受影响路由映射，L0/L1/L2 全绿。
+
+## 2026-08-01 哈希冻结收窄 + 分层测试覆盖负向路径（c2-single-frozen-validation-layer）
+
+### 目标
+保留 sha256 冻结作为防漂移手段，但范围收窄到判卷基准三文件；新增分层测试覆盖负向路径（转码失败、端口占用、播放中断）；为每类变更声明受影响路由，使验证与改动面一一对应。
+
+### 改动
+- **哈希冻结收窄**：冻结范围 = 判卷基准三文件（tests/acceptance.py / test.html / tests/fixtures/sample.mp4）。content.js/player.css/server.py 等实现文件不再受哈希约束，由分层测试行为验证覆盖（冻结只锁判卷基准，不锁实现）。
+- **L1 单测/集成** `tests/test_server_api.py`（新增，29 用例，随机端口 + fake ffmpeg）：鉴权白名单 7 例、safe_join 穿越、file Range 206、列表/树/时长、control-key 分支、fake ffmpeg 转码失败（立即退出/二进制缺失）、SSE 上限 503 + 断连清理、is_port_in_use。
+- **L2 真实进程 E2E** `tests/e2e_extra.py`（新增，5 用例，真实 server.py + 真实 ffmpeg）：损坏文件转码失败（500 JSON 或 200 空流 + stream-error 结构化错误码）、8765 端口占用幂等启动（「已在运行」+ exit 0）、播放中断（/api/stream 读一半断开 + /api/control SSE 断连）、sample.mp4 正向对照。8765 被占时自动改独立测试端口（launcher 注入 ALLOWED_HOSTS），绝不打断用户播放。
+- **统一入口** `run_tests.sh`（新增）：L0 静态+哈希核对（复用 scripts/check.sh --static）→ L1 → L2 → 汇总打印变更→受影响路由映射表；`--full` 追加 L3 验收。
+
+### 变更 -> 受影响路由 -> 验证层（声明于 run_tests.sh）
+- 鉴权/CORS -> 全部 /api/* -> L1 鉴权组 + L3
+- 路径校验 -> /api/file /api/stream /api/duration -> L1 路径组
+- 目录/树/时长 -> /api/files /api/tree /api/duration -> L1 列表组
+- 热键链路 -> /api/control-key /api/control -> L1 control-key 组 + L2 interrupt_sse
+- 转码/错误码 -> /api/stream /api/stream-error /api/stop -> L1 fake ffmpeg + L2 真实 ffmpeg
+- 播放中断 -> /api/stream /api/control -> L1 SSE 上限/清理 + L2 interrupt_*
+- 端口/启动 -> 服务器启动路径 -> L1 is_port_in_use + L2 port_in_use
+- 前端 -> 浏览器行为（非 HTTP 路由）-> L3 acceptance（冻结基准）
+
+### 关键澄清（B14 记录与现状不符）
+- 复核实测：acceptance.py=c1965638… / test.html=4b79893e… / sample.mp4=9b4a8281…，与 CLAUDE.md/PROGRESS.md 存档及 git HEAD 一字不差（git show HEAD:tests/acceptance.py 即 c1965638…）。
+- B14 记录的「实测 ff550f24/a4c77dd6/bdd72076 与 git 初始提交一致」无法被 git 证实（初始提交 2a89173 中 acceptance.py 为空文件 e3b0c44…），与磁盘及 HEAD 均不符——判定为当时误测/误记，本次决策以实测与存档一致为准，无需修正任何哈希值。
+
+### 验证
+- `bash run_tests.sh`：L0 静态 11/11（含三基准 sha256 冻结 PASS）、L1 29/29、L2 5/5 全绿，退出码 0。
+- L1/L2 各连续多轮复跑无 flaky；L2 在外部模式（8765 被用户服务器占用）与空闲模式均验证通过。
+- 竞态记录：serve_stream 秒挂探测（250ms 内 poll 到 ffmpeg 退出）-> 500 JSON；未 poll 到 -> 200 空流 + finally 写错误码，两态均为合法契约（错误码最终经 /api/stream-error 可查），测试断言兼容两态。
+
+## 2026-08-01 转码错误落盘 + 播放端结构化错误透传
+
+> 更新：2026-08-01 转码错误落盘 + 播放端结构化错误透传——失败路径用例 8/8，回归 12/12 全绿。
+
+### 目标
+转码子进程 stderr 从 DEVNULL 改为落盘（logs/transcode-<req>.log，时间戳+请求关联命名）；播放端错误回调透传结构化错误码 + 用户可读提示；新增注入错误路径失败用例，验证“日志与提示同时产生”。
+
+### 改动
+- server.py：serve_stream 的 ffmpeg stderr 直写 `logs/transcode-<req>.log`（req 由播放端生成 base36 时间戳+随机，非法时服务器自生成；同名追加序号防覆盖；启动清理 7 天前日志）；新增 `GET /api/stream-error?req=` 查询端点（结构化 {code,message,log}）；`parse_transcode_error` 把退出码+stderr 尾部映射为 INVALID_DATA / UNSUPPORTED_CODEC / FILE_READ_ERROR / TRANSCODE_FAILED / FFMPEG_NOT_FOUND / FFMPEG_SPAWN_FAILED / STREAM_ABORTED；秒挂探测（ffmpeg 250ms 内退出）改发 500 JSON 而非 200 空流（mpegts 对非 2xx 必触发 ERROR）；流响应头带 X-RVC-Request-Id。
+- content.js：转码请求带 `&req=`；mpegts ERROR 回调查 /api/stream-error 透传错误码+提示，`.rvc-transcode-error` 横幅展示（data-req 关联、可关闭、escapeHtml 转义）；三路触发去重（mpegts ERROR / video onerror / 15s 转码超时兜底），旧请求按 reqId 比对忽略。
+- player.html：同步透传（状态栏显示 `错误[code] 提示`）。
+- tests/e2e-error-path.py（新增，非冻结清单）：注入坏 MKV 失败用例，8 项断言（注入 / 横幅码+提示 / console 透传 / 日志落盘且含 ffmpeg stderr / 查询接口一致）。
+
+### 验收
+- 失败路径：`python3 tests/e2e-error-path.py` → 8/8 过（INVALID_DATA；transcode-msae68tr-fp2222.log 1175B 落盘且含 "Invalid data found when processing input"；横幅、console、查询接口三者一致）。
+- 正常路径：ffmpeg 造 5s MKV curl 拉流 → 142KB TS 流以 0x47 同步字节开头；日志照常落盘；stream-error 返回 code:null。
+- 回归：acceptance.py 12/12 全绿（注意：profile 残留 layout 会导致 B 空载高度误报，先 `rm -rf /tmp/rvc-pw-profile-accept`）。
+- 注：8899 是 manifest content_scripts 唯一匹配端口，新用例固定用它（占用则复用，避免端口漂移）。
 
 ## 2026-08-01 本地钩子检查闸门（进入主干的唯一通路）
 
