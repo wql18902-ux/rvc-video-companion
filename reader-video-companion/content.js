@@ -397,8 +397,9 @@
     }
   }
 
-  elements.dirPickBtn.addEventListener('click', async () => {
-    if (!state.serverOnline) return;
+  // 调服务端弹原生访达；返回 true=已选目录, 'cancelled'=用户取消, false=失败
+  async function doPickFolder() {
+    if (!state.serverOnline) return false;
     elements.dirPickBtn.disabled = true;
     elements.dirPickBtn.textContent = '选择中...';
     try {
@@ -406,11 +407,12 @@
       const data = await res.json();
       if (data.ok && data.dir) {
         elements.dirInput.value = data.dir;
-        loadFileList();
+        return true;
       } else if (data.cancelled) {
-        // 用户取消，静默不报错
+        return 'cancelled';
       } else if (data.error) {
         elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + ICON.alert + ' ' + escapeHtml(data.error) + '</span>';
+        return false;
       }
     } catch (e) {
       elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">访达选择失败: ' + escapeHtml(e.message) + '</span>';
@@ -419,6 +421,20 @@
       elements.dirPickBtn.innerHTML = ICON.folder + ' 浏览';
       updatePickBtnState();
     }
+    return false;
+  }
+
+  // 工具栏「浏览」：一步直弹访达（不再先开网页面板），选完再展示文件列表面板
+  async function openFolderViaFinder() {
+    if (!state.serverOnline) { showFolderOverlay(); return; }
+    const r = await doPickFolder();
+    await showFolderOverlay();
+    if (r === true) loadFileList();
+  }
+
+  elements.dirPickBtn.addEventListener('click', async () => {
+    const r = await doPickFolder();
+    if (r === true) loadFileList();
   });
 
   // 识别版本标签
@@ -1000,8 +1016,8 @@
   }
 
   // ========== 按钮事件 ==========
-  elements.btnFolder.addEventListener('click', showFolderOverlay);
-  elements.btnLoadMain.addEventListener('click', showFolderOverlay);
+  elements.btnFolder.addEventListener('click', openFolderViaFinder);
+  elements.btnLoadMain.addEventListener('click', openFolderViaFinder);
 
   // ========== 无框模式 ==========
   let frameless = false;
@@ -1233,6 +1249,17 @@
     elements.keysToggleBtn.classList.toggle('rvc-keys-off', !keyState.enabled);
   }
 
+  // 把当前按键推送到服务端：全局热键子进程据此重启，使自定义键在页面失焦时也生效
+  function pushKeybindingsToServer() {
+    try {
+      fetch(SERVER + '/api/set-keybindings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state.keybindings)
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
   function saveKeybindings() {
     try {
       // 写入端统一校验：非法键（IME 多字符候选词等）回退默认，杜绝脏值落盘
@@ -1242,6 +1269,7 @@
         }
       }
       chrome.storage.local.set({ 'rvc-keybindings': state.keybindings }).catch(() => {});
+      pushKeybindingsToServer();
     } catch (e) {}
   }
 
@@ -1323,6 +1351,8 @@
         };
       }
       updateKeysButton();
+      // 初始化时把本地按键同步到服务端，确保全局热键子进程用的是同一套绑定
+      pushKeybindingsToServer();
     }).catch(() => {});
   } catch (e) {}
   updateKeysButton();

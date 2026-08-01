@@ -32,6 +32,7 @@
 
 ## 登记在案的下一步
 
+- **全局热键可自定义（2026-08-02 用户报告「热键改不了」，根因已探明）**：两套热键通道键位脱节——页面内热键（content.js keydown）可自定义（keys-panel + chrome.storage.local），但**全局热键（server.py run_hotkey_child pynput，server.py:192-200）硬编码 s/a/d 不跟随自定义**，鼠标不在播放器上时按新键没反应。方案已批准（见 ~/.claude/plans/nested-waddling-riddle.md）：server 新增 GET/POST /api/keybindings 键位存储 + 子进程读配置 + content.js saveKeybindings 同步 + 改键后重启热键子进程；同时加输入监控权限自动引导（CGPreflightListenEventAccess 探测 + open Privacy_ListenEvent 跳设置，health 加 input_monitor 字段）。**Playwright 已验证页面内改键链路通**（s→w 生效、旧键失效），缺的是全局侧同步。另：用户记忆中的「自动跳输入监控设置」git 全史从未实现，是 macOS 系统层 TCC 首次访问时的行为
 - **方案 A（备选重构）**：MKV 首次点击转 MP4 缓存（视频流 copy 不重编码，一部电影一两分钟），之后秒开，彻底砍掉实时转码和 mpegts.js。B 路线固有毛病（假进度条、高 CPU、seek 重启转码流）烦到用户时启动
 - **死代码清理**：`reader-video-companion/player.html`（16.9KB）无任何引用（实际服务的是 stream-server/player.html），两份并存是漂移温床，建议删除——等用户确认
 - **媒体键退路**：若 macOS 媒体键路由不生效，改 pynput 全局热键（需给终端授辅助功能权限一次）

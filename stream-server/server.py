@@ -126,6 +126,41 @@ control_queue = queue.Queue()
 control_clients = []          # SSE 连接列表
 control_clients_lock = threading.Lock()
 hotkey_thread = None
+hotkey_proc = None             # 全局热键子进程句柄，便于按键变更后回收重启
+
+# 全局热键默认绑定（须与 content.js DEFAULT_KEYBINDINGS 对齐）
+DEFAULT_KEYBINDINGS = {'toggle_play': 's', 'back': 'a', 'forward': 'd'}
+KEYBINDINGS_FILE = os.path.expanduser('~/.rvc/keybindings.json')
+
+
+def load_keybindings():
+    """从 ~/.rvc/keybindings.json 读取用户自定义热键；缺失/非法回退默认。"""
+    try:
+        if os.path.isfile(KEYBINDINGS_FILE):
+            with open(KEYBINDINGS_FILE, encoding='utf-8') as f:
+                saved = json.load(f)
+            kb = dict(DEFAULT_KEYBINDINGS)
+            for action in DEFAULT_KEYBINDINGS:
+                v = saved.get(action)
+                if isinstance(v, str) and len(v) == 1 and v.isalnum():
+                    kb[action] = v.lower()
+            return kb
+    except Exception:
+        pass
+    return dict(DEFAULT_KEYBINDINGS)
+
+
+def save_keybindings(kb):
+    """持久化用户自定义热键到 ~/.rvc/keybindings.json。"""
+    try:
+        os.makedirs(os.path.dirname(KEYBINDINGS_FILE), exist_ok=True)
+        with open(KEYBINDINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(kb, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+CURRENT_KEYBINDINGS = load_keybindings()
 
 
 def broadcast_control_event(action):
@@ -142,31 +177,73 @@ def broadcast_control_event(action):
                 control_clients.remove(q)
 
 
-def start_hotkey_listener():
-    """启动全局热键子进程（A/D/S 控制视频）。
+def start_hotkey_listener(bindings=None):
+    """启动全局热键子进程（A/D/S 控制视频，或用户自定义绑定）。
     热键监听隔离到独立子进程：无「输入监控」权限时 pynput 进程会被 macOS SIGKILL，
     隔离后只死子进程，HTTP 服务不受影响。主进程不 wait、不重启；
-    子进程连续 POST 失败 10 次自行退出。"""
+    子进程连续 POST 失败 10 次自行退出。
+    bindings=None 时用默认 s/a/d；否则通过 --bindings 把 {action:char} 传给子进程。"""
+    global hotkey_proc
     if getattr(sys, 'frozen', False):
         cmd = [sys.executable, '--hotkey-child']
     else:
         cmd = [sys.executable, os.path.abspath(__file__), '--hotkey-child']
+    if bindings:
+        cmd += ['--bindings', json.dumps(bindings, ensure_ascii=False)]
     try:
-        proc = subprocess.Popen(cmd)
-        print(f"  [OK] 全局热键子进程已启动（pid={proc.pid}）：A=后退1秒  D=前进1秒  S=暂停/播放")
+        hotkey_proc = subprocess.Popen(cmd)
+        kb_desc = bindings or DEFAULT_KEYBINDINGS
+        print(f"  [OK] 全局热键子进程已启动（pid={hotkey_proc.pid}）："
+              f"自定义绑定 {kb_desc}")
     except Exception as e:
+        hotkey_proc = None
         print(f"  [WARN] 热键子进程启动失败：{e}（全局热键不可用，浏览/播放等其余功能不受影响）")
+
+
+def restart_hotkey_listener():
+    """用当前 CURRENT_KEYBINDINGS 重启热键子进程（按键变更后调用）。"""
+    global hotkey_proc
+    if hotkey_proc is not None:
+        try:
+            hotkey_proc.terminate()
+        except Exception:
+            pass
+        hotkey_proc = None
+    start_hotkey_listener(CURRENT_KEYBINDINGS)
 
 
 def run_hotkey_child():
     """热键子进程入口：只跑 pynput 监听，按键 POST 到主进程 /api/control-key。
-    连续 POST 失败 10 次自行退出（主进程已死）。"""
+    连续 POST 失败 10 次自行退出（主进程已死）。
+    按键绑定从 --bindings 参数读取（content.js 推送的自定义键），缺失用默认 s/a/d。"""
     import urllib.request
     try:
         from pynput import keyboard
     except ImportError:
         print("[hotkey-child] 未安装 pynput，退出")
         return
+
+    # 解析主进程传入的自定义绑定；非法/缺失回退默认
+    bindings = DEFAULT_KEYBINDINGS
+    if '--bindings' in sys.argv:
+        try:
+            idx = sys.argv.index('--bindings') + 1
+            parsed = json.loads(sys.argv[idx])
+            if isinstance(parsed, dict):
+                bindings = {}
+                for action, ch in parsed.items():
+                    if isinstance(ch, str) and len(ch) == 1 and ch.isalnum():
+                        bindings[action] = ch.lower()
+                # 补齐缺失 action，避免 key 缺失导致部分功能无热键
+                for action in DEFAULT_KEYBINDINGS:
+                    bindings.setdefault(action, DEFAULT_KEYBINDINGS[action])
+        except Exception:
+            bindings = dict(DEFAULT_KEYBINDINGS)
+    # 构建 char -> action 映射，on_press 直接查表
+    char_to_action = {}
+    for action, ch in bindings.items():
+        if isinstance(ch, str) and len(ch) == 1:
+            char_to_action[ch.lower()] = action
 
     state = {'fail': 0}
     FAIL_LIMIT = 10
@@ -191,13 +268,10 @@ def run_hotkey_child():
 
     def on_press(key):
         try:
-            if hasattr(key, 'char'):
-                if key.char == 's' or key.char == 'S':
-                    post_action('toggle_play')
-                elif key.char == 'a' or key.char == 'A':
-                    post_action('back')
-                elif key.char == 'd' or key.char == 'D':
-                    post_action('forward')
+            if hasattr(key, 'char') and key.char:
+                action = char_to_action.get(key.char.lower())
+                if action:
+                    post_action(action)
         except Exception:
             pass
 
@@ -333,6 +407,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             self.serve_duration(params)
         elif path == '/api/control':
             self.serve_control_sse()
+        elif path == '/api/keybindings':
+            self.send_json({'ok': True, 'bindings': CURRENT_KEYBINDINGS})
         elif path == '/api/stop':
             kill_current_proc()
             self.send_json({'ok': True})
@@ -346,6 +422,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             return
         if parsed.path == '/api/control-key':
             self.serve_control_key()
+        elif parsed.path == '/api/set-keybindings':
+            self.serve_set_keybindings()
         else:
             self.send_error(404)
 
@@ -380,6 +458,28 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({'ok': True})
         else:
             self.send_json({'ok': False, 'error': 'unknown action'})
+
+    def serve_set_keybindings(self):
+        """接收 content.js 推送的用户自定义热键，校验后持久化并重启子进程。
+        严格校验：仅接受单字符 a-z0-9，杜绝 IME 候选词/修饰键名/多字符脏值；
+        某 action 非法时保留其默认键，不继承客户端脏值。"""
+        length = int(self.headers.get('Content-Length', 0))
+        try:
+            body = self.rfile.read(length) if length > 0 else b''
+            data = json.loads(body) if body else {}
+        except Exception:
+            self.send_json({'ok': False, 'error': 'bad json'})
+            return
+        kb = dict(DEFAULT_KEYBINDINGS)
+        for action in DEFAULT_KEYBINDINGS:
+            v = data.get(action)
+            if isinstance(v, str) and len(v) == 1 and v.isalnum():
+                kb[action] = v.lower()
+        global CURRENT_KEYBINDINGS
+        CURRENT_KEYBINDINGS = kb
+        save_keybindings(kb)
+        restart_hotkey_listener()
+        self.send_json({'ok': True, 'bindings': kb})
 
     def send_json(self, data):
         self.send_response(200)
@@ -484,18 +584,23 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """弹出原生文件选择对话框，选择视频目录。
         成功返回 {ok:true,dir:/abs/path/}；用户取消返回 {cancelled:true}；
         超时/报错返回 {ok:false,error:...}。"""
-        # 纯 Standard Additions 的 choose folder + activate me，不需要自动化权限
-        # （tell System Events 会触发 -1743 权限弹窗，python 升级后权限失效）
-        # 对话框可能不自动前置，用户需从 Dock 点访达
+        # 分两步让访达对话框稳定前置（release v3.2.2-test 的 activate me 会躲在浏览器后）：
+        # 步骤1: open -a Finder —— LaunchServices 激活 Finder，无需 TCC 自动化权限
+        # 步骤2: osascript choose folder —— 纯 Standard Additions，无需 TCC，此时 Finder 已前置
         with open('/tmp/rvc-pick-folder.log', 'a') as _log:
             _log.write(f'[{datetime.datetime.now()}] pick-folder 被调用\n')
             _log.flush()
         clean_env = {k: v for k, v in os.environ.items() if k not in ('PYTHONHOME', 'PYTHONPATH')}
+        # 步骤1：LaunchServices 激活 Finder（失败不阻断，choose folder 仍可弹）
+        try:
+            subprocess.run(['open', '-a', 'Finder'], env=clean_env, timeout=5)
+        except Exception:
+            pass
+        # 步骤2：纯 Standard Additions choose folder，Finder 已前置对话框自然靠前
         try:
             result = subprocess.run(
                 ['osascript', '-e',
-                 'activate me',
-                 '-e', 'set f to choose folder',
+                 'set f to choose folder',
                  '-e', 'return POSIX path of f'],
                 capture_output=True, text=True, timeout=60, env=clean_env
             )
@@ -870,7 +975,7 @@ if __name__ == '__main__':
     print("=" * 50)
     print()
 
-    start_hotkey_listener()
+    start_hotkey_listener(CURRENT_KEYBINDINGS)
     print()
     print("在浏览器打开上面的地址即可开始使用")
     print("按 Ctrl+C 停止服务")
