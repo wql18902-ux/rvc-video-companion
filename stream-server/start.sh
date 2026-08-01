@@ -1,5 +1,5 @@
 #!/bin/bash
-# RVC 流式播放器 - 一键启动脚本
+# RVC 视频伴侣 - 一键启动脚本
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVER="$SCRIPT_DIR/server.py"
@@ -23,5 +23,5 @@ if [ ! -f "$SCRIPT_DIR/mpegts.min.js" ]; then
 fi
 
 # 启动服务器
-echo "启动 RVC 流式播放器..."
+echo "启动 RVC 视频伴侣..."
 python3 "$SERVER"

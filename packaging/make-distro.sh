@@ -14,6 +14,10 @@ EXT_DIR="$PROJECT_ROOT/reader-video-companion"
 DIST="$PKG_DIR/dist"
 STAGING="$DIST/RVC视频伴侣"
 
+# ADR-001: 版本号唯一源 = reader-video-companion/manifest.json（构建期读取注入）
+VER="$(python3 -c "import json;print(json.load(open('$EXT_DIR/manifest.json'))['version'])")"
+echo "==> 版本号（源 manifest.json）：$VER"
+
 # 检查 .app 是否存在
 if [ ! -d "$APP" ]; then
   echo "[错误] 未找到 .app，请先运行：bash stream-server/packaging/build.sh"
@@ -91,7 +95,7 @@ COMMAND_SCRIPT
 chmod +x "$STAGING/首次打开-点我.command"
 
 # --- 安装说明 ---
-cat > "$STAGING/安装说明.txt" <<'INSTRUCTIONS'
+cat > "$STAGING/安装说明.txt" <<INSTRUCTIONS
 ╔══════════════════════════════════════════════╗
 ║         RVC 视频伴侣 - 安装指南              ║
 ╚══════════════════════════════════════════════╝
@@ -186,7 +190,7 @@ cat > "$STAGING/安装说明.txt" <<'INSTRUCTIONS'
   所有视频只在你的电脑本地处理。
   服务器只监听 127.0.0.1，不联网、不上传任何数据。
 
-  版本 v3.2.2 · macOS 12+
+  版本 v$VER · macOS 12+
 INSTRUCTIONS
 
 echo "==> [4/4] 打包 zip"

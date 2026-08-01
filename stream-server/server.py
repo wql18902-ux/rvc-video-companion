@@ -812,7 +812,7 @@ if __name__ == '__main__':
 
     server = ThreadedHTTPServer(('127.0.0.1', PORT), StreamHandler)
     print("=" * 50)
-    print("  [INFO] RVC 流式播放器")
+    print("  [INFO] RVC 视频伴侣")
     print(f"  [INFO] 地址：http://127.0.0.1:{PORT}")
     print(f"  [INFO] 默认目录：{DEFAULT_DIR}")
     print("=" * 50)

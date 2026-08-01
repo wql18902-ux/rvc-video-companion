@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# RVC 流式播放器 - Mac 一键打包脚本（内部版）
+# RVC 视频伴侣 - Mac 一键打包脚本（内部版）
 # 产物：packaging/dist/RVC视频伴侣.app（约 100-150MB）
 # 依赖：python3 + brew ffmpeg（或 PATH 中的 ffmpeg/ffprobe）
 # ============================================================
@@ -12,6 +12,10 @@ STREAM_DIR="$PROJECT_ROOT/stream-server"
 BUILD_DIR="$PKG_DIR/build"
 STAGING="$BUILD_DIR/staging"
 VENV="$PKG_DIR/.venv"
+
+# ADR-001: 版本号唯一源 = reader-video-companion/manifest.json（构建期读取注入）
+VER="$(python3 -c "import json;print(json.load(open('$PROJECT_ROOT/reader-video-companion/manifest.json'))['version'])")"
+echo "==> 版本号（源 manifest.json）：$VER"
 
 echo "==> [1/4] 准备 PyInstaller venv"
 if [ ! -x "$VENV/bin/pyinstaller" ]; then
@@ -152,8 +156,8 @@ if [ -f "$BUILD_DIR/rvc.icns" ]; then
   cp "$BUILD_DIR/rvc.icns" "$APP/Contents/Resources/rvc.icns"
 fi
 
-# Info.plist
-cat > "$APP/Contents/Info.plist" <<'EOF'
+# Info.plist（版本号 $VER 由 manifest.json 注入，ADR-001）
+cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -163,8 +167,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
   <key>CFBundleName</key><string>RVC视频伴侣</string>
   <key>CFBundleDisplayName</key><string>RVC视频伴侣</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>3.2.0</string>
-  <key>CFBundleShortVersionString</key><string>3.2.0</string>
+  <key>CFBundleVersion</key><string>$VER</string>
+  <key>CFBundleShortVersionString</key><string>$VER</string>
   <key>CFBundleIconFile</key><string>rvc.icns</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>

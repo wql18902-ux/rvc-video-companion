@@ -1,6 +1,6 @@
 # RVC 视频伴侣（内部版）安装说明
 
-> 版本：v3.2.0 · 适用：macOS 12+（Apple Silicon / Intel）· 免装 Python / ffmpeg
+> 版本：v3.2.2 · 适用：macOS 12+（Apple Silicon / Intel）· 免装 Python / ffmpeg
 
 一个把视频播放器嵌进阅读页面的 Chrome 扩展：**左边看文章，右边看视频**，支持
 MKV/MOV 实时转码播放、无框模式、倍速（0.25×–3×）、键盘 A/S/D 控制。

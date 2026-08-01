@@ -99,7 +99,7 @@
 
     player.innerHTML = `
       <div class="rvc-header">
-        <span class="rvc-title">${ICON.video} 视频伴侣</span>
+        <span class="rvc-title">${ICON.video} RVC 视频伴侣</span>
         <div class="rvc-header-buttons">
           <button class="rvc-header-btn rvc-btn-folder" title="选择文件">${ICON.folder}</button>
           <button class="rvc-header-btn rvc-btn-frameless" title="无框模式">${ICON.frame}</button>
@@ -1203,6 +1203,11 @@
   const SSE_DEDUPE_MS = 400;
   const DEFAULT_KEYBINDINGS = { toggle_play: 's', back: 'a', forward: 'd' };
 
+  // 合法绑定键 = 单个 ASCII 字母/数字（排除 IME 合成态的多字符中文候选词、修饰键名）
+  function isValidBindingKey(k) {
+    return typeof k === 'string' && /^[a-z0-9]$/.test(k);
+  }
+
   function markLocalKey(action) {
     lastLocalKeyAt[action] = Date.now();
   }
@@ -1227,6 +1232,12 @@
 
   function saveKeybindings() {
     try {
+      // 写入端统一校验：非法键（IME 多字符候选词等）回退默认，杜绝脏值落盘
+      for (const action of Object.keys(DEFAULT_KEYBINDINGS)) {
+        if (!isValidBindingKey(state.keybindings[action])) {
+          state.keybindings[action] = DEFAULT_KEYBINDINGS[action];
+        }
+      }
       chrome.storage.local.set({ 'rvc-keybindings': state.keybindings }).catch(() => {});
     } catch (e) {}
   }
@@ -1301,10 +1312,11 @@
       }
       if (result && result['rvc-keybindings'] && typeof result['rvc-keybindings'] === 'object') {
         const saved = result['rvc-keybindings'];
+        // 读端合法性校验：非法键（历史脏值如 IME 候选词「一个」）回退默认，而非 truthy 兜底
         state.keybindings = {
-          toggle_play: saved.toggle_play || DEFAULT_KEYBINDINGS.toggle_play,
-          back: saved.back || DEFAULT_KEYBINDINGS.back,
-          forward: saved.forward || DEFAULT_KEYBINDINGS.forward
+          toggle_play: isValidBindingKey(saved.toggle_play) ? saved.toggle_play : DEFAULT_KEYBINDINGS.toggle_play,
+          back: isValidBindingKey(saved.back) ? saved.back : DEFAULT_KEYBINDINGS.back,
+          forward: isValidBindingKey(saved.forward) ? saved.forward : DEFAULT_KEYBINDINGS.forward
         };
       }
       updateKeysButton();
@@ -1315,6 +1327,9 @@
   document.addEventListener('keydown', (e) => {
     // 按键录入模式：捕获下一个按键
     if (capturingAction) {
+      // IME 输入法合成中（中文候选词）：直接忽略，不拦截，等用户定键
+      // —— 防止「一个」等多字符候选词被当作按键录入 storage
+      if (e.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       const key = e.key.toLowerCase();
@@ -1324,6 +1339,8 @@
         updateKeyBtns();
         return;
       }
+      // 仅接受单个 ASCII 字母/数字；非法（多字符/功能键）忽略并保持录入态，待用户重按
+      if (!isValidBindingKey(key)) return;
       state.keybindings[capturingAction] = key;
       saveKeybindings();
       capturingAction = null;

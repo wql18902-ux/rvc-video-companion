@@ -101,6 +101,26 @@ else
   fail "emoji 残留 $EMOJI_OUT"
 fi
 
+# 6. 版本号一致性（ADR-001：manifest.json 为唯一源，构建脚本/文档不许硬编码不同版本）
+SRC_VER="$(run_py -c "import json;print(json.load(open('reader-video-companion/manifest.json'))['version'])" 2>/dev/null)"
+if [ -n "$SRC_VER" ]; then
+  pass "版本源 manifest.json = $SRC_VER"
+  # 检查 Info.plist heredoc 是否已改为 $VER 注入（不再硬编码版本号）
+  if grep -q 'CFBundleShortVersionString.*[0-9]\+\.[0-9]\+\.[0-9]\+' stream-server/packaging/build.sh 2>/dev/null; then
+    fail "build.sh Info.plist 仍硬编码版本号（应使用 \$VER 注入，ADR-001）"
+  else
+    pass "build.sh Info.plist 版本号已走 \$VER 注入"
+  fi
+  # 检查 make-distro.sh 安装说明是否已改为 v$VER（不再硬编码）
+  if grep -q '版本 v[0-9]\+\.[0-9]\+\.[0-9]\+' packaging/make-distro.sh 2>/dev/null; then
+    fail "make-distro.sh 安装说明仍硬编码版本号（应使用 v\$VER，ADR-001）"
+  else
+    pass "make-distro.sh 安装说明版本号已走 v\$VER 注入"
+  fi
+else
+  fail "无法从 manifest.json 读取版本号"
+fi
+
 if [ "$FAIL" -ne 0 ]; then
   echo ""
   echo "[ABORT] 静态检查未通过，修复后重跑 scripts/check.sh --static"

@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# RVC 流式播放器 Mac .app 打包配置（PyInstaller）
+# RVC 视频伴侣 Mac .app 打包配置（PyInstaller）
 # 用法：packaging/build.sh（会先做 ffmpeg 依赖收集，再调用本 spec）
 import os
 

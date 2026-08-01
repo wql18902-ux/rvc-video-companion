@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RVC 流式播放器</title>
+<title>RVC 视频伴侣</title>
 <script src="/mpegts.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -183,7 +183,7 @@ video {
 
 <div class="sidebar">
   <div class="sidebar-header">
-    <h1>🎬 RVC 流式播放器</h1>
+    <h1>🎬 RVC 视频伴侣</h1>
     <div class="dir-input">
       <input type="text" id="dirInput" placeholder="视频目录路径" value="">
       <button onclick="loadFiles()">刷新</button>
@@ -273,7 +273,7 @@ function setupMediaSession(filename) {
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: filename,
-      artist: 'RVC 流式播放器'
+      artist: 'RVC 视频伴侣'
     });
     navigator.mediaSession.setActionHandler('play', () => { video.play(); });
     navigator.mediaSession.setActionHandler('pause', () => { video.pause(); });
