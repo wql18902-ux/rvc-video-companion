@@ -495,20 +495,33 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """弹出原生文件选择对话框，选择视频目录。
         成功返回 {ok:true,dir:/abs/path/}；用户取消返回 {cancelled:true}；
         超时/报错返回 {ok:false,error:...}。"""
-        # 先激活 Finder 把对话框带到前台（activate me 对无窗口后台进程无效——
-        # 打包版 rvc-server 是无窗口后台进程，激活无效导致对话框在后台不显示）
-        # 仍用纯 Standard Additions 的 choose folder，不需要自动化权限
-        # （tell System Events 会触发 -1743 权限弹窗，python 升级后权限失效）
+        # 分两步弹窗，规避打包版 TCC「自动化」授权缺失问题：
+        # 第 1 步用 LaunchServices（open 命令）把 Finder 带到前台，不涉及
+        # Apple Events 通信，不需要自动化授权；第 2 步用纯 Standard Additions
+        # 的 choose folder（无 tell 其他 app），同样不需要自动化权限。
+        # 为什么不用 tell application "Finder" to activate：那是 Apple Events
+        # 通信，打包版 .app 是无 TCC「自动化」授权的新签名二进制，Finder 会拒绝
+        # 该事件报 -1708（errAEEventNotHandled）；源码版从终端跑继承终端授权
+        # 所以正常。为什么不用 tell System Events：会触发 -1743
+        # （errAEEventNotPermitted）权限弹窗。
         with open('/tmp/rvc-pick-folder.log', 'a') as _log:
             _log.write(f'[{datetime.datetime.now()}] pick-folder 被调用\n')
             _log.flush()
         clean_env = {k: v for k, v in os.environ.items() if k not in ('PYTHONHOME', 'PYTHONPATH')}
+        # 第 1 步：LaunchServices 激活 Finder 到前台（open 命令不需要 Apple Events 授权；
+        # 不检查 returncode——Finder 激活失败也不阻塞弹窗，choose folder 仍会弹，
+        # 只是可能不前置；用 try/except 包住防止意外异常）
+        try:
+            subprocess.run(['open', '-a', 'Finder'], timeout=10)
+        except Exception as _e:
+            # Finder 激活失败不影响 choose folder 弹窗，仅记日志后忽略
+            with open('/tmp/rvc-pick-folder.log', 'a') as _log:
+                _log.write(f'[{datetime.datetime.now()}] open -a Finder 失败: {_e}\n')
+        # 第 2 步：纯 Standard Additions 弹窗（无 tell 其他 app，不需要自动化权限）
         try:
             result = subprocess.run(
                 ['osascript', '-e',
-                 'tell application "Finder" to activate',
-                 '-e', 'delay 0.5',
-                 '-e', 'set f to choose folder with prompt "选择视频目录"',
+                 'set f to choose folder with prompt "选择视频目录"',
                  '-e', 'return POSIX path of f'],
                 capture_output=True, text=True, timeout=60, env=clean_env
             )
