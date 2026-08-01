@@ -495,9 +495,10 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """弹出原生文件选择对话框，选择视频目录。
         成功返回 {ok:true,dir:/abs/path/}；用户取消返回 {cancelled:true}；
         超时/报错返回 {ok:false,error:...}。"""
-        # 纯 Standard Additions 的 choose folder + activate me，不需要自动化权限
+        # 先激活 Finder 把对话框带到前台（activate me 对无窗口后台进程无效——
+        # 打包版 rvc-server 是无窗口后台进程，激活无效导致对话框在后台不显示）
+        # 仍用纯 Standard Additions 的 choose folder，不需要自动化权限
         # （tell System Events 会触发 -1743 权限弹窗，python 升级后权限失效）
-        # 对话框可能不自动前置，用户需从 Dock 点访达
         with open('/tmp/rvc-pick-folder.log', 'a') as _log:
             _log.write(f'[{datetime.datetime.now()}] pick-folder 被调用\n')
             _log.flush()
@@ -505,8 +506,9 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         try:
             result = subprocess.run(
                 ['osascript', '-e',
-                 'activate me',
-                 '-e', 'set f to choose folder',
+                 'tell application "Finder" to activate',
+                 '-e', 'delay 0.5',
+                 '-e', 'set f to choose folder with prompt "选择视频目录"',
                  '-e', 'return POSIX path of f'],
                 capture_output=True, text=True, timeout=60, env=clean_env
             )
