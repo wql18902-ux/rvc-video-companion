@@ -3,7 +3,7 @@
 # 双击此文件 = 启动服务器 + 打开 aim-read.top
 
 cd "$(dirname "$0")"
-bash start.sh
+bash "$(dirname "$0")/start.sh"
 echo ""
 echo "[INFO] 按任意键关闭此窗口（服务器在后台继续运行）"
 read -n 1
