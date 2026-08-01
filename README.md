@@ -39,7 +39,7 @@
 ```
 帮我安装 RVC 视频伴侣。按以下步骤执行，每步完成后告诉我进度：
 
-1. 从 https://github.com/wql18902-ux/rvc-video-companion/releases/latest 下载最新的 RVC视频伴侣.zip 到 ~/Downloads/
+1. 从 https://github.com/wql18902-ux/rvc-video-companion/releases/latest 下载最新的 RVC-Video-Companion.zip 到 ~/Downloads/
 2. 解压到 ~/Downloads/RVC视频伴侣/（如果解压出 __MACOSX 文件夹忽略它）
 3. 移除 macOS 隔离标记（否则双击会报「已损坏，无法打开」）：
    xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
@@ -68,7 +68,7 @@
 
 ### 方式一：下载打包版手动安装（无需装环境）
 
-1. 到 [Releases](../../releases) 下载 `RVC视频伴侣.zip`
+1. 到 [Releases](../../releases) 下载 `RVC-Video-Companion.zip`
 2. 解压
 3. 终端执行 `xattr -cr RVC视频伴侣.app`（移除隔离标记，否则报「已损坏」）
 4. 双击「RVC视频伴侣.app」启动服务器
