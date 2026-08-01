@@ -26,7 +26,12 @@
 - server.py：serve_control_sse 心跳保活（15s 写 `: ping` 注释行替代 30s 主动断）；MAX_SSE_CLIENTS=10 超限 503。
 - 验收：POST control-key→SSE 收到 toggle_play 事件 ✓；连接跨 20s 仍活跃（收到 : ping）✓；并发 12 连接 9×200+3×503（上限生效）✓。
 
-### 任务 4：回归（进行中）
+### 任务 4：回归（已完成，2026-08-01 20:05）
+- 验收回归 12/12 全绿（A-H，CORS 白名单未误伤 8899 测试页、XSS 修复未破坏 DOM、SSE 单例不影响本地热键）。
+- 任务 1 六条 curl 复核全符合（404/403/200/403/200/0）。
+- 判卷三文件指纹与任务 0 实测一字不差（ff550f24/a4c77dd6/bdd72076），tests/ 零 diff。
+- git 提交 138b11e（fix(security)，白名单 4 文件：server.py/content.js/PROGRESS.md/BLOCKED.md）。
+- 白名单外 CLAUDE.md 的 M 为先前会话遗留（19:18 修改，非本次引入），未动未提交，待用户处理。
 
 ## 2026-08-01 打包版「浏览」无反应修复（任务书-打包版浏览修复）
 

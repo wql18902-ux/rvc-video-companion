@@ -8,6 +8,12 @@
 - 排查：git 初始提交 2a89173（v3.2.1 开源初始提交）中三文件指纹 = ff550f24/a4c77dd6/bdd72076，与当前工作区一字不差 → 判卷文件未被篡改，存档为过期记录（疑早期未提交版本指纹）。
 - 判定：不阻塞，以 git 初始提交指纹（= 实测）为当前判卷基线，PROGRESS.md 存档待后续同步更新。
 
+## B15. CLAUDE.md 遗留 M（2026-08-01 安全修复任务 4 发现）
+
+- 现象：任务完成 git diff --stat 白名单外出现 CLAUDE.md 的 M（修改未提交），内容是 v3.2.2 状态描述更新（commit dea5ef6、18:58 zip 重建、.command 权限待修）。
+- 排查：文件修改时间 19:18，早于本次执行开工（19:31）→ 先前会话/用户遗留，非本次引入。
+- 判定：不在本次白名单，未动未提交；待用户确认后单独处理（含 README-内部版.md 的同源过期内容）。
+
 ## B13. 选目录弹窗前置 frontmost 机器半验受限（待领导亲验，不阻塞）
 
 - 现象：任务2验收第1项，curl /api/pick-folder 挂起中 osascript 查 frontmost 期望 "System Events"，实测三版（System Events activate / Finder activate / set frontmost of process）均返回 "Electron"（测试环境 Electron 应用持续占前台，疑 Claude Desktop 或 VS Code 宿主抢焦点）。
