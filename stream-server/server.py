@@ -611,12 +611,14 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         # 第 1 步：LaunchServices 激活 Finder 到前台（open 命令不需要 Apple Events 授权；
         # 不检查 returncode——Finder 激活失败也不阻塞弹窗，choose folder 仍会弹，
         # 只是可能不前置；用 try/except 包住防止意外异常）
+        # --hide：隐藏 Finder 窗口（choose folder 是 osascript 独立对话框，不受 Finder
+        # 可见性影响），避免 Finder 抢前台遮挡真正的选择对话框（修复 B1 断裂点）
         try:
-            subprocess.run(['open', '-a', 'Finder'], timeout=10)
+            subprocess.run(['open', '-a', 'Finder', '--hide'], timeout=10)
         except Exception as _e:
             # Finder 激活失败不影响 choose folder 弹窗，仅记日志后忽略
             with open('/tmp/rvc-pick-folder.log', 'a') as _log:
-                _log.write(f'[{datetime.datetime.now()}] open -a Finder 失败: {_e}\n')
+                _log.write(f'[{datetime.datetime.now()}] open -a Finder --hide 失败: {_e}\n')
         # 第 2 步：纯 Standard Additions 弹窗（无 tell 其他 app，不需要自动化权限）
         try:
             result = subprocess.run(
@@ -780,14 +782,21 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
 
     def serve_stream_error(self, params):
         """查询一次转码请求的最终结果：结构化错误码 + 用户可读提示 + 日志文件名。
-        播放端在 mpegts 错误回调中调用（ffmpeg 退出后结果才就绪，播放端需重试）。"""
+        服务端长轮询：结果未就绪时最多等待 5s（200ms 间隔轮询）再返回 unknown，
+        覆盖"ffmpeg 仍在解析坏文件、结果晚于 mpegts 错误回调写入"的竞态窗口
+        （修复前客户端 2s 重试窗口不够，慢速转码会 fallback 误报）。"""
         req_id = params.get('req', [''])[0]
-        with transcode_lock:
-            result = transcode_results.get(req_id)
-        if not result:
-            self.send_json({'ok': False, 'error': 'unknown request'})
-            return
-        self.send_json({'ok': True, **result})
+        deadline = time.time() + 5.0
+        while True:
+            with transcode_lock:
+                result = transcode_results.get(req_id)
+            if result:
+                self.send_json({'ok': True, **result})
+                return
+            if time.time() >= deadline:
+                self.send_json({'ok': False, 'error': 'unknown request'})
+                return
+            time.sleep(0.2)
 
     def send_transcode_error(self, req_id, code, message, log_name):
         """转码在流开始前即失败（spawn 失败或 250ms 内退出）：发 500 JSON 替代 200 空流。
@@ -927,8 +936,16 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
         finally:
-            kill_current_proc()
-            # ffmpeg 已退出：取退出码 + 读 stderr 日志尾部，解析为结构化错误码
+            # 只终止本请求的进程：不用全局 kill_current_proc()（它可能已指向新请求
+            # 的进程，误杀会导致新转码失败）。ffmpeg 正常退出时 poll() 已非 None，
+            # kill 为 no-op；仅客户端断开且 ffmpeg 仍在跑时主动终止。
+            try:
+                if proc_ref.poll() is None:
+                    proc_ref.kill()
+            except Exception:
+                pass
+            # ffmpeg 已退出：取退出码 + 读 stderr 日志尾部，解析为结构化错误码，
+            # 立即写入结果缓存（不依赖后续查询重试，配合 /api/stream-error 长轮询）
             try:
                 rc = proc_ref.wait(timeout=5)
             except Exception:

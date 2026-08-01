@@ -526,6 +526,15 @@
 .rvc-dir-pick-btn:hover:not(:disabled) { background: rgba(10, 132, 255, 0.32); color: #fff; }
 .rvc-dir-pick-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* macOS 高级选项（访达选择）：弱化视觉，区别于主路径（Web 树/手动路径） */
+.rvc-btn-advanced {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #aaa;
+  font-size: 12px;
+}
+.rvc-btn-advanced:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); color: #ddd; }
+
 /* 固定目录 chips（弹层顶部） */
 .rvc-pinned-bar {
   display: flex;

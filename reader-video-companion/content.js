@@ -1,3 +1,8 @@
+// RVC 视频伴侣 · 播放器浮层（content script，MV3 单文件）
+// 架构：单 IIFE 内按区组织 —— 状态(state) / 元素(elements) / 文件夹浮层 / 固定目录 /
+//       目录树 / 播放加载(loadFile) / 转码错误(fetchTranscodeError) / 控制按钮 / 拖拽。
+// 交互入口：header 文件夹图标 + 「加载视频」按钮 -> showFolderOverlay()（浮层内选
+//   Web 树 / 手动路径 / 访达），不再自动弹 Finder（见 engineering 审查 2026-08-02）。
 (function() {
   'use strict';
 
@@ -52,15 +57,9 @@
     keybindings: { toggle_play: 's', back: 'a', forward: 'd' }  // 自定义按键（chrome.storage.local 持久化）
   };
 
-  // 一次性迁移：layout schema 不匹配时清掉旧 rvc-layout（fixed 时代残留的异常尺寸/位置会导致 player 超出视口）
-  const LAYOUT_SCHEMA = 'v3.2.2-sticky';
-  try {
-    chrome.storage.local.get('rvc-layout-schema').then(v => {
-      if (v && v['rvc-layout-schema'] === LAYOUT_SCHEMA) return;
-      chrome.storage.local.remove('rvc-layout');
-      chrome.storage.local.set({ 'rvc-layout-schema': LAYOUT_SCHEMA });
-    }).catch(() => {});
-  } catch (e) {}
+  // 布局尺寸由 saveLayout/restoreLayout 持久化（rvc-layout），
+  // restoreLayout 自带宽度下限守卫（<360 的 fixed 时代脏数据会被忽略）。
+  // v3.0.x 的 rvc-layout-schema 一次性迁移已于 v3.2.2 完成，此处移除。
 
   // ========== 查找文章内容容器 ==========
   function findArticleContainer() {
@@ -189,7 +188,7 @@
         <div class="rvc-folder-dir">
           <input type="text" class="rvc-dir-input" value="~/Downloads" placeholder="视频目录路径">
           <button class="rvc-dir-btn">刷新</button>
-          <button class="rvc-dir-pick-btn" title="访达选择目录">${ICON.folder} 浏览</button>
+          <button class="rvc-dir-pick-btn rvc-btn-advanced" title="访达选择目录（macOS 高级选项）">${ICON.folder} 浏览</button>
           <button class="rvc-pin-btn" title="固定当前目录">${ICON.pin}</button>
           <button class="rvc-dir-browse-btn" title="浏览目录树">${ICON.folder}</button>
         </div>
@@ -369,8 +368,11 @@
     // overlay 已先显示（即时反馈），chips 在 storageReady 后补齐
     await storageReady;
     renderPinnedChips();
-    // 不自动 loadFileList：避免覆盖用户 fill 的路径（race condition）
-    // 用户点"刷新"或 fill 后回车才 loadFileList
+    // 自动列出上次目录文件（若已恢复），减少一次手动刷新；
+    // loadFileList 内部有 seq 令牌，用户随后 fill/刷新会顶替自动请求，不会互相覆盖
+    if (elements.dirInput.value.trim()) {
+      loadFileList();
+    }
   }
 
   function hideFolderOverlay() {
@@ -390,7 +392,7 @@
   function updatePickBtnState() {
     if (state.serverOnline) {
       elements.dirPickBtn.disabled = false;
-      elements.dirPickBtn.title = '访达选择目录';
+      elements.dirPickBtn.title = '访达选择目录（macOS 高级选项）';
     } else {
       elements.dirPickBtn.disabled = true;
       elements.dirPickBtn.title = '需启动服务器';
@@ -424,17 +426,9 @@
     return false;
   }
 
-  // 工具栏「浏览」：先显示面板（即时反馈 + 验收兼容 acceptance.py 等 folderOverlay 可见），再弹访达
-  async function openFolderViaFinder() {
-    await showFolderOverlay();
-    if (!state.serverOnline) return;
-    // 自动化环境（playwright/selenium 等 navigator.webdriver=true）不弹真访达，
-    // 避免系统模态对话框卡住无人值守的验收流程；真用户正常弹访达
-    if (navigator.webdriver) return;
-    const r = await doPickFolder();
-    if (r === true) loadFileList();
-  }
-
+  // 工具栏「浏览/加载视频」：只显示浮层，不自动弹 Finder（用户自己决定：
+  // Web 目录树 / 手动路径 / 访达选择）。Finder 弹窗改为浮层内「浏览」按钮的
+  // 显式高级操作，避免"点击按钮弹出访达抢前台"的困惑。
   elements.dirPickBtn.addEventListener('click', async () => {
     const r = await doPickFolder();
     if (r === true) loadFileList();
@@ -468,7 +462,12 @@
     return tags.map(t => `<span class="rvc-version-tag ${t.class}">${t.label}</span>`).join('');
   }
 
+  // 文件列表请求序号：showFolderOverlay 自动加载 + 用户手动刷新可能并发，
+  // 用 seq 令牌丢弃陈旧响应，避免旧目录结果覆盖新输入（acceptance C 步依赖）
+  let fileListSeq = 0;
+
   async function loadFileList() {
+    const seq = ++fileListSeq;
     const dir = elements.dirInput.value.trim() || '~/Downloads';
     elements.folderStatus.textContent = '加载中...';
     elements.folderList.innerHTML = '';
@@ -483,6 +482,7 @@
     try {
       const res = await fetch(SERVER + '/api/files?dir=' + encodeURIComponent(dir));
       const data = await res.json();
+      if (seq !== fileListSeq) return;   // 已被更新的刷新请求顶替，丢弃陈旧结果
       if (data.error) {
         elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + escapeHtml(data.error) + '</span>';
         return;
@@ -491,6 +491,7 @@
         elements.folderStatus.textContent = '该目录没有视频文件';
         return;
       }
+      if (seq !== fileListSeq) return;
       elements.dirInput.value = data.dir;
       elements.folderStatus.textContent = '共 ' + data.files.length + ' 个文件';
 
@@ -515,7 +516,9 @@
         elements.folderList.appendChild(item);
       });
     } catch (e) {
-      elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">请求失败: ' + escapeHtml(e.message) + '</span>';
+      if (seq === fileListSeq) {
+        elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">请求失败: ' + escapeHtml(e.message) + '</span>';
+      }
     }
   }
 
@@ -912,13 +915,14 @@
         fetchTranscodeError(reqId, 'TRANSCODE_FAILED');
       };
 
-      // 兜底 2：转码 15s 无进展（空流等 mpegts 不报错场景）时主动查询错误
+      // 兜底 2：转码 10s 无进展（空流等 mpegts 不报错场景）时主动查询错误
+      // （正常本地转码首帧 ≤3s，10s 足够；坏文件由服务端长轮询 + 三路检测兜底）
       state.transcodeTimer = setTimeout(() => {
         if (state.currentReqId !== reqId || state.isPlaying) return;
         hideLoading();
         console.warn('RVC transcode timeout, req=' + reqId);
         fetchTranscodeError(reqId, 'TRANSCODE_FAILED');
-      }, 15000);
+      }, 10000);
 
       state.player.attachMediaElement(elements.video);
       state.player.load();
@@ -975,21 +979,21 @@
   // ========== 转码错误：透传服务器结构化错误码 + 用户可读提示 ==========
   function fetchTranscodeError(reqId, fallbackType) {
     if (state.transcodeErrorShown) return;   // mpegts ERROR / video error / 超时三路触发去重
-    // 服务器在 ffmpeg 退出后才写入结果，错误回调可能略早于落盘，重试几次兜底
+    // 服务器 /api/stream-error 已改为服务端长轮询（结果未就绪时最多等 5s，
+    // 覆盖 ffmpeg 慢速解析坏文件导致的写入延迟）；此处单次请求即可拿到结果，
+    // 仅在网络异常时重试几次兜底（此前 2s 重试窗口在慢速转码下会误报）
     const tryFetch = (attempt) => {
       fetch(SERVER + '/api/stream-error?req=' + encodeURIComponent(reqId))
         .then(r => r.json())
         .then(d => {
           if (d && d.ok && d.code) {
             showTranscodeError(reqId, d.code, d.message, d.log);
-          } else if (attempt < 5) {
-            setTimeout(() => tryFetch(attempt + 1), 400);
           } else {
             showTranscodeError(reqId, fallbackType || 'TRANSCODE_FAILED', '转码失败，请重试', '');
           }
         })
         .catch(() => {
-          if (attempt < 5) setTimeout(() => tryFetch(attempt + 1), 400);
+          if (attempt < 3) setTimeout(() => tryFetch(attempt + 1), 1000);
           else showTranscodeError(reqId, fallbackType || 'TRANSCODE_FAILED', '转码失败，请重试', '');
         });
     };
@@ -1019,8 +1023,10 @@
   }
 
   // ========== 按钮事件 ==========
-  elements.btnFolder.addEventListener('click', openFolderViaFinder);
-  elements.btnLoadMain.addEventListener('click', openFolderViaFinder);
+  // 「加载视频」(btnLoadMain) 与 header 文件夹图标(btnFolder)：统一打开浮层，
+  // 不自动弹 Finder——用户从浮层内选 Web 树/手动路径/访达三种方式之一
+  elements.btnFolder.addEventListener('click', () => showFolderOverlay());
+  elements.btnLoadMain.addEventListener('click', () => showFolderOverlay());
 
   // ========== 无框模式 ==========
   let frameless = false;
