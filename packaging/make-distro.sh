@@ -42,57 +42,7 @@ cp -R "$EXT_DIR" "$STAGING/reader-video-companion"
 find "$STAGING" -name ".DS_Store" -delete
 find "$STAGING" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-echo "==> [3/4] 写入安装说明和首次打开脚本"
-
-# --- 首次打开脚本（解决 macOS「已损坏」拦截）---
-cat > "$STAGING/首次打开-点我.command" <<'COMMAND_SCRIPT'
-#!/bin/bash
-# RVC 视频伴侣 - 清除 macOS 隔离标记
-# 作用：解决从浏览器下载后双击 .app 报「已损坏，无法打开」的问题
-# 原理：删除 macOS 给下载文件打的 quarantine 隔离属性
-
-APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_PATH="$APP_DIR/RVC视频伴侣.app"
-
-echo ""
-echo "============================================"
-echo "  RVC 视频伴侣 - 首次打开修复工具"
-echo "============================================"
-echo ""
-
-if [ ! -d "$APP_PATH" ]; then
-    echo "[错误] 找不到 RVC视频伴侣.app"
-    echo "请确保此脚本和 RVC视频伴侣.app 在同一个文件夹里。"
-    echo ""
-    read -p "按回车键关闭窗口..."
-    exit 1
-fi
-
-echo "正在清除 macOS 隔离标记..."
-xattr -cr "$APP_PATH" 2>/dev/null
-
-# 验证是否清除成功
-if xattr -l "$APP_PATH" 2>/dev/null | grep -q "com.apple.quarantine"; then
-    echo ""
-    echo "[警告] 隔离标记未能完全清除，请尝试手动执行："
-    echo "  打开「终端」app，粘贴以下命令后回车："
-    echo ""
-    echo "  xattr -cr \"$APP_PATH\""
-    echo ""
-else
-    echo ""
-    echo "============================================"
-    echo "  清除完成！"
-    echo ""
-    echo "  现在可以双击「RVC视频伴侣.app」启动了。"
-    echo "  （本脚本以后不需要再运行）"
-    echo "============================================"
-fi
-
-echo ""
-read -p "按回车键关闭窗口..."
-COMMAND_SCRIPT
-chmod +x "$STAGING/首次打开-点我.command"
+echo "==> [3/4] 写入安装说明"
 
 # --- 安装说明 ---
 cat > "$STAGING/安装说明.txt" <<INSTRUCTIONS
@@ -100,30 +50,21 @@ cat > "$STAGING/安装说明.txt" <<INSTRUCTIONS
 ║         RVC 视频伴侣 - 安装指南              ║
 ╚══════════════════════════════════════════════╝
 
-只需 4 步，3 分钟搞定。
+只需 3 步，3 分钟搞定。
 
 
-━━ 第 0 步：清除隔离标记（首次必做）━━
+━━ 第 0 步：清除隔离标记（首次必做，只需一次）━━
 
   从浏览器下载的文件会被 macOS 标记为「隔离」，
   直接双击 .app 会报「已损坏，无法打开」。
 
-  解决方法（二选一）：
+  打开「终端」app（Spotlight 搜 Terminal），粘贴这行命令后回车：
 
-  方法 A（推荐）：双击「首次打开-点我.command」
-    - 如果系统提示「无法打开」或「无法验证开发者」：
-      右键点它 → 选「打开」→ 点确认
-    - 如果右键也没有「打开」选项：
-      打开 系统设置 → 隐私与安全性 → 往下滚
-      会看到「已阻止使用 首次打开-点我.command」
-      点旁边的「仍要打开」按钮
-    - 终端窗口会闪一下，显示「清除完成」即可
-
-  方法 B（手动）：打开「终端」app，粘贴这行命令后回车：
     xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
-    （路径根据你实际解压位置调整）
 
-  做完第 0 步后，以后每次打开 .app 都不会再被拦截。
+  （路径根据你实际解压位置调整）
+
+  做完后，以后每次打开 .app 都不会再被拦截。
 
 
 ━━ 第 1 步：启动服务器 ━━
@@ -170,7 +111,7 @@ cat > "$STAGING/安装说明.txt" <<INSTRUCTIONS
 ━━ 常见问题 ━━
 
   Q: 双击 .app 报「已损坏，无法打开」？
-  A: 你没做第 0 步。双击「首次打开-点我.command」或手动跑 xattr -cr。
+  A: 你没做第 0 步。打开终端跑 xattr -cr（命令见第 0 步）。
 
   Q: 提示"服务器未启动"？
   A: 确认 .app 在运行（活动监视器搜 RVC），或访问 127.0.0.1:8765 看有无响应
@@ -206,7 +147,6 @@ echo ""
 echo "  内容："
 echo "    RVC视频伴侣.app              ← 本地服务器（含 ffmpeg）"
 echo "    reader-video-companion/      ← Chrome 扩展"
-echo "    首次打开-点我.command         ← 清除隔离标记（首次必跑）"
-echo "    安装说明.txt                  ← 使用指南"
+echo "    安装说明.txt                  ← 使用指南（含第 0 步 xattr 清隔离）"
 echo ""
-echo "  发给别人后：解压 → 双击 .command → 双击 .app → Chrome 加载扩展 → 开用"
+echo "  发给别人后：解压 → 终端跑 xattr -cr → 双击 .app → Chrome 加载扩展 → 开用"

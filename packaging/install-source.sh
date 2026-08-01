@@ -128,14 +128,22 @@ read -n 1
 CMD
 chmod +x "$INSTALL_DIR/启动.command"
 
-# --- 6. 测试启动 ---
+# --- 6. 测试启动（轮询等待就绪）---
 echo "[5/5] 测试启动服务器..."
 cd "$INSTALL_DIR"
 bash start.sh &
 SERVER_PID=$!
-sleep 3
 
-if curl -s "http://127.0.0.1:8765/api/files?dir=~" > /dev/null 2>&1; then
+echo "      等待服务器就绪..."
+READY=0
+for i in $(seq 1 15); do
+  if curl -s --max-time 2 "http://127.0.0.1:8765/api/files?dir=~" > /dev/null 2>&1; then
+    READY=1; break
+  fi
+  sleep 1
+done
+
+if [ "$READY" -eq 1 ]; then
   echo ""
   echo "============================================"
   echo "  安装成功，服务器已启动！"
@@ -152,20 +160,10 @@ if curl -s "http://127.0.0.1:8765/api/files?dir=~" > /dev/null 2>&1; then
   echo "  或双击：$INSTALL_DIR/启动.command"
   echo "============================================"
 else
-  # 启动可能慢，等一下
-  sleep 3
-  if curl -s "http://127.0.0.1:8765/api/files?dir=~" > /dev/null 2>&1; then
-    echo ""
-    echo "============================================"
-    echo "  安装成功，服务器已启动！"
-    echo "  Chrome 扩展目录：$INSTALL_DIR/reader-video-companion"
-    echo "============================================"
-  else
-    echo ""
-    echo "  服务器可能未启动成功。请手动运行："
-    echo "    cd $INSTALL_DIR && bash start.sh"
-    echo "  查看具体错误信息。"
-  fi
+  echo ""
+  echo "  服务器可能未启动成功。请手动运行："
+  echo "    cd $INSTALL_DIR && bash start.sh"
+  echo "  查看具体错误信息。"
 fi
 
 echo ""

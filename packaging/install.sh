@@ -12,9 +12,15 @@ set -euo pipefail
 
 # --- 配置 ---
 GITHUB_REPO="wql18902-ux/rvc-video-companion"
-ZIP_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/RVC-Video-Companion.zip"
+ZIP_NAME="RVC-Video-Companion.zip"
 INSTALL_DIR="$HOME/Applications/RVC视频伴侣"
-ZIP_FILE="/tmp/RVC-Video-Companion.zip"
+ZIP_FILE="/tmp/$ZIP_NAME"
+
+# 多源 fallback（国内 GitHub 慢时自动切镜像）
+DOWNLOAD_URLS=(
+  "https://github.com/${GITHUB_REPO}/releases/latest/download/${ZIP_NAME}"
+  "https://ghproxy.net/https://github.com/${GITHUB_REPO}/releases/latest/download/${ZIP_NAME}"
+)
 
 echo ""
 echo "============================================"
@@ -28,36 +34,41 @@ if [ "$(uname)" != "Darwin" ]; then
   exit 1
 fi
 
-# --- 2. 下载 ---
-echo "[1/4] 正在从 GitHub 下载..."
-if command -v curl &>/dev/null; then
-  curl -fSL --progress-bar -o "$ZIP_FILE" "$ZIP_URL"
-elif command -v wget &>/dev/null; then
-  wget -q --show-progress -O "$ZIP_FILE" "$ZIP_URL"
-else
-  echo "[错误] 需要 curl 或 wget，但都找不到。"
-  exit 1
-fi
+# --- 2. 下载（多源 fallback）---
+echo "[1/4] 正在下载..."
+DOWNLOADED=0
+for url in "${DOWNLOAD_URLS[@]}"; do
+  echo "      尝试：$url"
+  if command -v curl &>/dev/null; then
+    if curl -fSL --connect-timeout 10 --progress-bar -o "$ZIP_FILE" "$url" 2>/dev/null; then
+      DOWNLOADED=1; break
+    fi
+  elif command -v wget &>/dev/null; then
+    if wget -q --timeout=10 --show-progress -O "$ZIP_FILE" "$url" 2>/dev/null; then
+      DOWNLOADED=1; break
+    fi
+  fi
+  rm -f "$ZIP_FILE" 2>/dev/null
+done
 
-if [ ! -f "$ZIP_FILE" ]; then
-  echo "[错误] 下载失败，请检查网络连接。"
+if [ "$DOWNLOADED" -ne 1 ] || [ ! -f "$ZIP_FILE" ]; then
+  echo "[错误] 所有下载源均失败。请检查网络，或手动从 GitHub Releases 下载。"
   exit 1
 fi
 echo "      下载完成 ($(du -sh "$ZIP_FILE" | cut -f1))"
 
-# --- 3. 解压安装 ---
+# --- 3. 解压安装（ditto 保留资源叉/签名结构）---
 echo "[2/4] 解压到 ~/Applications/..."
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-unzip -qo "$ZIP_FILE" -d "$INSTALL_DIR"
+ditto -xk "$ZIP_FILE" "$INSTALL_DIR"
 rm -f "$ZIP_FILE"
 
 # 处理 zip 内可能有的嵌套目录（zip 解压后可能多一层文件夹）
 NESTED="$(find "$INSTALL_DIR" -maxdepth 1 -type d -name "RVC视频伴侣*" | head -1)"
 if [ -n "$NESTED" ] && [ "$NESTED" != "$INSTALL_DIR" ]; then
-  # 把嵌套内容提上来
-  mv "$NESTED"/* "$INSTALL_DIR"/ 2>/dev/null || true
-  mv "$NESTED"/.* "$INSTALL_DIR"/ 2>/dev/null || true
+  # 把嵌套内容提上来（find -mindepth 1 避免匹配 . 和 ..）
+  find "$NESTED" -mindepth 1 -maxdepth 1 -exec mv {} "$INSTALL_DIR"/ \;
   rmdir "$NESTED" 2>/dev/null || true
 fi
 
@@ -78,14 +89,21 @@ xattr -cr "$APP_PATH" 2>/dev/null || true
 
 echo "      已安装到：$INSTALL_DIR"
 
-# --- 5. 启动 ---
+# --- 5. 启动（轮询等待就绪）---
 echo "[4/4] 启动 RVC 视频伴侣..."
 open "$APP_PATH"
-sleep 2
 
-# 检查是否启动成功
-if curl -s "http://127.0.0.1:8765/api/files?dir=~" > /dev/null 2>&1; then
-  echo ""
+echo "      等待服务器就绪..."
+READY=0
+for i in $(seq 1 15); do
+  if curl -s --max-time 2 "http://127.0.0.1:8765/api/files?dir=~" > /dev/null 2>&1; then
+    READY=1; break
+  fi
+  sleep 1
+done
+
+echo ""
+if [ "$READY" -eq 1 ]; then
   echo "============================================"
   echo "  安装成功，服务器已启动！"
   echo ""
@@ -99,11 +117,10 @@ if curl -s "http://127.0.0.1:8765/api/files?dir=~" > /dev/null 2>&1; then
   echo "  以后每次使用：双击 ~/Applications/RVC视频伴侣/RVC视频伴侣.app"
   echo "============================================"
 else
-  echo ""
   echo "============================================"
-  echo "  安装完成！服务器正在启动中..."
+  echo "  安装完成！服务器可能还在启动中..."
   echo ""
-  echo "  如果 10 秒后仍无法使用，请手动双击："
+  echo "  如果 15 秒后仍无法使用，请手动双击："
   echo "  $APP_PATH"
   echo ""
   echo "  Chrome 扩展目录："
