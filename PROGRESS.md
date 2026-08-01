@@ -254,6 +254,8 @@
 
 ## 当前状态
 
+> 2026-08-02 洁癖收尾更新：下方「当前状态」章节陈旧（v3.2.0 时代），现役真相以 **CLAUDE.md「当前状态」** 为准（v3.2.2 + swift-thunder-newton P0-P2 + 启动脚本修复，main=fc0e50b 已推送）。本文件继续作为历史版本叙事，不再维护「当前状态」快照，避免双源漂移。
+
 - **内部版（v3.2.0）✅ 唯一方案，已完成**：共享基线 S1-S4 + A1 权限收窄 + A2 PyInstaller .app + A3 .crx + 分发包打包脚本
   - 产物：`stream-server/packaging/dist/RVC视频伴侣.app`（57MB，内置 ffmpeg/ffprobe）+ `packaging/reader-video-companion.crx`
   - 一键分发包：`packaging/make-distro.sh` → `packaging/dist/RVC视频伴侣.zip`（24MB，含 .app + 扩展 + 安装说明）

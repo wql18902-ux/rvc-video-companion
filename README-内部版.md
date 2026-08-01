@@ -1,6 +1,7 @@
 # RVC 视频伴侣（内部版）安装说明
 
-> 版本：v3.2.2 · 适用：macOS 12+（Apple Silicon / Intel）· 免装 Python / ffmpeg
+> 版本：v3.2.2 · 适用：macOS 12+（Apple Silicon / Intel）· 打包版免装 Python / ffmpeg
+> 源码版（本仓库直接跑）额外需：Python 3.10+、ffmpeg/ffprobe（brew install ffmpeg）、pynput（全局热键，`python3 -m pip install pynput`；缺失时仅热键失效，服务器其余功能正常）
 
 > 本文面向**维护者/管理员**。终端用户请看 [README.md](README.md)。
 

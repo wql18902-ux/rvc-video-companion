@@ -91,7 +91,9 @@ rm -rf /tmp/rvc-pw-profile-accept
 env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 ```
 
-**前置依赖**：Python 3.10+、ffmpeg、ffprobe、aiohttp、pynput
+**前置依赖**：Python 3.10+、ffmpeg、ffprobe、pynput（全局热键；缺失时仅热键失效，服务器其余功能正常）
+
+> 源码版服务器仅用 Python 标准库（`http.server`），无需 pip 安装任何包；pynput 为全局热键可选依赖。
 
 ## 首次使用权限授权（macOS）
 
@@ -99,7 +101,7 @@ env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 |------|------|-----------|
 | 输入监控 | 全局热键 S/A/D | 仅全局热键失效，其余功能正常 |
 
-> 选目录用的是 `osascript choose folder`（Standard Additions），**不需要自动化权限**。
+> 选目录走 macOS 原生「选取文件夹」对话框：先 `open -a Finder --hide` 激活（LaunchServices，无 TCC 自动化权限依赖），再纯 Standard Additions `choose folder` 弹出。**不需要自动化权限**。
 > 每次更新 .app 后，输入监控权限会失效（系统按签名记账），需重新勾选。
 
 ## 支持的视频格式
@@ -123,7 +125,7 @@ env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 ### 技术栈
 
 - **Chrome 扩展（MV3）**：Vanilla JS，无构建工具链
-- **本地服务器**：Python 3 aiohttp + ffmpeg/ffprobe
+- **本地服务器**：Python 3 标准库 `http.server`（BaseHTTPRequestHandler）+ ffmpeg/ffprobe
 - **流式播放**：mpegts.js（浏览器端 MPEG-TS 解码）
 - **打包分发**：PyInstaller 打包 .app（含 ffmpeg 二进制，用户无需装 Python/ffmpeg）
 
@@ -138,7 +140,7 @@ env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 │   ├── manifest.json         # MV3 清单（版本号唯一源）
 │   └── mpegts.min.js         # MPEG-TS 解码库
 ├── stream-server/            # 本地转码服务器
-│   ├── server.py             # aiohttp 服务器（含 SSE 热键通道）
+│   ├── server.py             # 本地服务器（http.server，含 SSE 热键通道）
 │   ├── start.sh              # 启动脚本
 │   └── packaging/            # .app 打包脚本
 │       └── build.sh          # PyInstaller 打包 .app
@@ -166,4 +168,3 @@ MIT
 
 - [mpegts.js](https://github.com/xqq/mpegts.js) — MPEG-TS 解码
 - [ffmpeg](https://ffmpeg.org/) — 视频转码
-- [aiohttp](https://docs.aiohttp.org/) — 异步 HTTP 服务器

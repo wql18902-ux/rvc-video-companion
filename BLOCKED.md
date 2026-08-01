@@ -1,18 +1,25 @@
 # BLOCKED - 待裁决/未决清单
 
-> 更新：2026-08-01 后续会话——重建打包版 .app + 分发包 zip，B11/B12 已解决关闭。B1 仍有效。
+> 更新：2026-08-02 —— B14 已解决（存档与实测一致，无篡改）；新增 B16 验收环境坑。B1 仍有效。
 
-## B14. PROGRESS.md 判卷指纹存档过期（2026-08-01 安全修复任务 0 发现）
+## B16. 验收环境两坑（2026-08-02 实测，WorkBuddy/IDE 环境特有）
 
-- 现象：任务 0 核对 shasum，实测 acceptance.py=ff550f24/test.html=a4c77dd6/sample.mp4=bdd72076，与 PROGRESS.md 存档 c1965638/4b79893e/9b4a8281 全部不符。
-- 排查：git 初始提交 2a89173（v3.2.1 开源初始提交）中三文件指纹 = ff550f24/a4c77dd6/bdd72076，与当前工作区一字不差 → 判卷文件未被篡改，存档为过期记录（疑早期未提交版本指纹）。
-- 判定：不阻塞，以 git 初始提交指纹（= 实测）为当前判卷基线，PROGRESS.md 存档待后续同步更新。
+- 现象：L3 验收 C 步 `.rvc-folder-item` 超时、A/B 过、日志无异常，反复复现。
+- 根因一：WorkBuddy 注入 `HTTP_PROXY=127.0.0.1:52577`（透明代理）→ Playwright Chromium 内 fetch 127.0.0.1:8765 全走代理 → 代理不通 → ERR_CONNECTION_REFUSED（curl 直连却正常，极具迷惑性）。解法：跑验收前 `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy`。
+- 根因二：Bash 工具跨调用清理后台进程 → 8765 服务器在上一命令启动、本命令已死（health 探测也常因此误判）。解法：服务器与验收必须**同一条命令内**启动（`cd stream-server && nohup python3 -u server.py & sleep 2 && cd .. && bash scripts/check.sh`）。
+- 已写入 CLAUDE.md「当前状态 · 验收环境两坑」。
 
-## B15. CLAUDE.md 遗留 M（2026-08-01 安全修复任务 4 发现）
+## B15. CLAUDE.md 遗留 M（2026-08-02 洁癖收尾已解决）
 
-- 现象：任务完成 git diff --stat 白名单外出现 CLAUDE.md 的 M（修改未提交），内容是 v3.2.2 状态描述更新（commit dea5ef6、18:58 zip 重建、.command 权限待修）。
-- 排查：文件修改时间 19:18，早于本次执行开工（19:31）→ 先前会话/用户遗留，非本次引入。
-- 判定：不在本次白名单，未动未提交；待用户确认后单独处理（含 README-内部版.md 的同源过期内容）。
+- 原现象：2026-08-01 安全修复任务 4 发现 CLAUDE.md 有先前会话遗留的 M（v3.2.2 状态描述更新）。
+- 解决：2026-08-02 洁癖收尾已把 CLAUDE.md「当前状态」整段重写为现役事实（swift-thunder-newton P0-P2 + 启动脚本 + 验收环境坑），并修掉 aiohttp 漂移。
+
+## B14. PROGRESS.md 判卷指纹存档过期（2026-08-02 已解决）
+
+- 原现象：2026-08-01 安全修复任务 0 核对 shasum，实测与 PROGRESS.md 存档不符，疑存档过期。
+- 排查结论（2026-08-01）：git 初始提交 2a89173 三文件指纹 = 实测值 ff550f24/a4c77dd6/bdd72076，判卷文件未被篡改。
+- 后续澄清（2026-08-01 哈希冻结收窄会话）：复核实测 acceptance.py=c1965638 / test.html=4b79893e / sample.mp4=9b4a8281，与 CLAUDE.md/PROGRESS.md 存档及 git HEAD 一字不差；B14 原记录的 ff550f24 等为当时误测/误记，决策以实测与存档一致为准。
+- 判定：已解决，无哈希值需修正。当前权威指纹 = c1965638/4b79893e/9b4a8281（CLAUDE.md/check.sh/run_tests.sh 一致）。
 
 ## B13. 选目录弹窗前置 frontmost 机器半验受限（待领导亲验，不阻塞）
 

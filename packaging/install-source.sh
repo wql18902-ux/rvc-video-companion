@@ -63,11 +63,8 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   fi
 fi
 
-# 检查 Python 依赖
-python3 -c "import aiohttp" 2>/dev/null || {
-  echo "      安装 Python 依赖 (aiohttp)..."
-  python3 -m pip install --quiet aiohttp 2>/dev/null || pip3 install --quiet aiohttp
-}
+# 检查 Python 依赖：服务器仅用标准库（http.server），无需 pip 包；
+# pynput 为全局热键可选依赖（缺失时仅热键失效，服务器其余功能正常）
 python3 -c "import pynput" 2>/dev/null || {
   echo "      安装 Python 依赖 (pynput)..."
   python3 -m pip install --quiet pynput 2>/dev/null || pip3 install --quiet pynput

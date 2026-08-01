@@ -12,7 +12,7 @@ bash stream-server/start.sh
 # 加载扩展：chrome://extensions → 开发者模式 → 加载已解压 → reader-video-companion/
 # 使用：访问 aim-read.top，点扩展图标唤出浮窗播放器
 
-# 跑验收（必须先清 profile，否则 G2 残留致 C 超时）
+# 跑验收（必须先清 profile，否则 G2 残留致 C 超时；且需同一命令内拉起 8765 服务器 + 清 HTTP_PROXY，详见「验收环境」）
 rm -rf /tmp/rvc-pw-profile-accept
 env -u PYTHONHOME -u PYTHONPATH /opt/homebrew/bin/python3 tests/acceptance.py
 
@@ -30,7 +30,7 @@ TRAE 会注入 PYTHONHOME/PYTHONPATH 导致 python 报 "No module named 'encodin
 
 ## 技术栈
 
-Chrome MV3 扩展（Vanilla JS）/ Python 3 aiohttp 服务器 / ffmpeg+ffprobe / mpegts.js / PyInstaller 打包 .app
+Chrome MV3 扩展（Vanilla JS）/ Python 3 标准库 http.server（BaseHTTPRequestHandler，**非 aiohttp**）/ ffmpeg+ffprobe / mpegts.js / PyInstaller 打包 .app
 
 ## 目录与约定
 
@@ -57,12 +57,20 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 aiohttp 服务器 / ffmpeg+ffprobe /
 
 ## 当前状态
 
-v3.2.2（2026-08-01 发布，GitHub Release v3.2.2 + commit dea5ef6）。播放列表已回退。
-- **核心配置**：player.css 用 `position: sticky + float:right`（fixed 已回滚，违反硬约束）；server.py pick-folder 用 `activate me`（纯 Standard Additions，无自动化权限）；server.py 编码器 `libx264 -preset fast -crf 23`（h264_videotoolbox 已回滚）；content.js keys-panel 已恢复（state.keybindings + chrome.storage.local）
-- **v3.2.2 改动**：fixed→sticky 回滚修复挤压正文 / System Events→NSOpenPanel(setActivationPolicy_ 前置) / 恢复 keys-panel / README 加「方式二：让 AI Agent 帮你装」+ 功能截图 / 安装说明.txt 重写（解决 macOS quarantine「已损坏」UX 问题）
-- **v3.2.2 后续整顿（本次）**：热键 IME 脏值修复（捕获加 isComposing 过滤+单 ASCII 校验，兜底改合法性校验）/ 品牌统一 RVC 视频伴侣 / 版本单一源 ADR-001（manifest.json 为唯一源，build/make-distro 自动注入）/ 删 .command 鸡生蛋（清隔离统一终端一行 xattr）/ install.sh 多源 fallback+ditto 解压+轮询探活 / README 重排（手动下载提方式一，curl 降可选）/ check.sh 加版本号一致性校验
-- **打包版**：dist 的 .app/zip 仍是 18:58 旧版（含已删除的 .command），**需重建**（跑 build.sh + make-distro.sh）才含本次整顿。Release asset 名 `RVC-Video-Companion.zip`（GitHub 不支持中文 asset 名）。Release: https://github.com/wql18902-ux/rvc-video-companion/releases/tag/v3.2.2
+v3.2.2（manifest.json 唯一版本源；main 最新 = fc0e50b，已推送 origin/main）。
+- **2026-08-02 swift-thunder-newton 方案 P0-P2 已落地（commit 0152371）**：
+  - P0 文件选择 UX：删 `openFolderViaFinder()`，btnFolder/btnLoadMain 只 `showFolderOverlay()`（不自动弹 Finder）；浮层自动列上次目录 + loadFileList 带 seq 令牌守卫；dirPickBtn=「访达选择目录（macOS 高级选项）」；serve_pick_folder 用 `open -a Finder --hide` + Standard Additions choose folder
+  - P1 转码竞态：`/api/stream-error` 服务端长轮询（未就绪最多等 5s）；serve_stream finally 只 kill 本请求进程；客户端转码兜底超时 15s→10s
+  - P2 清理：删 LAYOUT_SCHEMA 迁移（restoreLayout 守卫兜底）；content.js 顶部模块注释
+  - P3 状态机简化**未做**（Archi ADR：单独立项，验收稳定后再评估）
+- **2026-08-02 启动脚本（6fbb3f9 + fc0e50b）**：.command 双击场景补 brew PATH；start.sh 增加 pynput 自检（缺失仅 WARN 不阻塞）
+- **核心配置**：player.css `position: sticky + float:right`（fixed 已回滚）；server.py pick-folder 用 `open -a Finder --hide` 两步弹窗（分步签名的打包版无 TCC 自动化权限，不能用 tell Finder/System Events）；server.py 编码器 `libx264 -preset fast -crf 23`；content.js keys-panel 恢复（state.keybindings + chrome.storage.local）
 - **历史根因（保留备查）**：pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL。已拆 `--hotkey-child` 子进程隔离。每次重打包 .app 后输入监控权限失效（adhoc 签名按二进制哈希记账），需重新授权
+- **验收环境两坑（2026-08-02 实测）**：
+  1. WorkBuddy/IDE 注入 `HTTP_PROXY=127.0.0.1:52577` 会让 Playwright Chromium 内 fetch 8765 全挂（curl 直连却正常）——跑 L3 必须 `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy`
+  2. Bash 工具跨调用清后台进程——L3 的 8765 服务器必须与验收**同一条命令内**启动：`cd stream-server && nohup /usr/local/bin/python3 -u server.py & sleep 2 && cd .. && bash scripts/check.sh`
+  3. 验收 H 步 EMOJI_RE 含 U+2190-21FF：content.js/player.css 注释里写 `→` 会 FAIL，一律用文字描述
+- **打包版待办**：dist 的 .app/zip 仍是 04:45 旧版（不含 0152371/6fbb3f9/fc0e50b），**需重建**（跑 build.sh + make-distro.sh，沙箱拦 rm -rf 需用户终端跑）后发新 release。Release 现有：v3.2.2（Latest，10:03）+ v3.2.2-test（Pre-release，19:25）
 - 运行态：双击 .app **无终端窗口**（后台运行），重复双击无副作用（端口检测后退出）；停止 `lsof -ti:8765 | xargs kill`
 - git push 代理三态规则（2026-08-02 实测卡点链复盘）：
   - 代理未开：`git -c http.proxy= -c https.proxy= push origin main`（清空代理直连）
