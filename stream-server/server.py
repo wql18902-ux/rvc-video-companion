@@ -42,7 +42,13 @@ MAX_SSE_CLIENTS = 10
 
 # 转码日志目录：每次 ffmpeg 请求的 stderr 落盘为 transcode-<req_id>.log
 # （req_id 由播放端生成：时间戳+随机，天然按时间与请求关联，便于排查）
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+# 打包版（frozen）下 __file__ 指向 .app 解包目录（Contents/Frameworks），若写日志到
+# 该处会破坏签名密封（codesign --verify --deep --strict 报 sealed resource 缺失），
+# 故 frozen 模式改写到用户日志目录；源码版保持 stream-server/logs/ 便于本地排查。
+if getattr(sys, 'frozen', False):
+    LOG_DIR = os.path.expanduser('~/Library/Logs/RVC视频伴侣')
+else:
+    LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 
 # 结构化转码错误码 -> 用户可读提示（播放端 /api/stream-error 透传）
 TRANSCODE_ERROR_MSGS = {
@@ -51,7 +57,7 @@ TRANSCODE_ERROR_MSGS = {
     'INVALID_DATA': '视频文件已损坏或不是有效的媒体文件',
     'UNSUPPORTED_CODEC': '视频/音频编码不受支持，无法转码',
     'FILE_READ_ERROR': '无法读取视频文件，请检查文件是否存在且有读取权限',
-    'TRANSCODE_FAILED': '转码失败，请查看服务器日志（stream-server/logs/）',
+    'TRANSCODE_FAILED': '转码失败，请查看服务器日志（服务器日志目录）',
     'STREAM_ABORTED': '播放已停止或已切换',
 }
 
@@ -84,9 +90,14 @@ def read_app_version():
     """读取版本号唯一源 reader-video-companion/manifest.json（ADR-001）；失败返回 unknown"""
     try:
         if getattr(sys, 'frozen', False):
-            base = os.path.dirname(os.path.abspath(sys.executable))
+            base = os.path.dirname(os.path.abspath(sys.executable))  # Contents/MacOS
             candidates = [
+                # 打包内置布局：manifest.json 由 build.sh 拷入 Contents/Resources/reader-video-companion/
                 os.path.join(base, '..', 'Resources', 'reader-video-companion', 'manifest.json'),
+                # 发行目录布局：发行目录/RVC视频伴侣.app + 发行目录/reader-video-companion/
+                # base=Contents/MacOS，需上溯 3 级（MacOS -> Contents -> .app -> 发行目录）
+                os.path.join(base, '..', '..', '..', 'reader-video-companion', 'manifest.json'),
+                # 兼容历史 Resources 布局（未来版本可能改回）
                 os.path.join(base, '..', '..', 'reader-video-companion', 'manifest.json'),
             ]
         else:
@@ -584,23 +595,33 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """弹出原生文件选择对话框，选择视频目录。
         成功返回 {ok:true,dir:/abs/path/}；用户取消返回 {cancelled:true}；
         超时/报错返回 {ok:false,error:...}。"""
-        # 分两步让访达对话框稳定前置（release v3.2.2-test 的 activate me 会躲在浏览器后）：
-        # 步骤1: open -a Finder —— LaunchServices 激活 Finder，无需 TCC 自动化权限
-        # 步骤2: osascript choose folder —— 纯 Standard Additions，无需 TCC，此时 Finder 已前置
+        # 分两步弹窗，规避打包版 TCC「自动化」授权缺失问题：
+        # 第 1 步用 LaunchServices（open 命令）把 Finder 带到前台，不涉及
+        # Apple Events 通信，不需要自动化授权；第 2 步用纯 Standard Additions
+        # 的 choose folder（无 tell 其他 app），同样不需要自动化权限。
+        # 为什么不用 tell application "Finder" to activate：那是 Apple Events
+        # 通信，打包版 .app 是无 TCC「自动化」授权的新签名二进制，Finder 会拒绝
+        # 该事件报 -1708（errAEEventNotHandled）；源码版从终端跑继承终端授权
+        # 所以正常。为什么不用 tell System Events：会触发 -1743
+        # （errAEEventNotPermitted）权限弹窗。
         with open('/tmp/rvc-pick-folder.log', 'a') as _log:
             _log.write(f'[{datetime.datetime.now()}] pick-folder 被调用\n')
             _log.flush()
         clean_env = {k: v for k, v in os.environ.items() if k not in ('PYTHONHOME', 'PYTHONPATH')}
-        # 步骤1：LaunchServices 激活 Finder（失败不阻断，choose folder 仍可弹）
+        # 第 1 步：LaunchServices 激活 Finder 到前台（open 命令不需要 Apple Events 授权；
+        # 不检查 returncode——Finder 激活失败也不阻塞弹窗，choose folder 仍会弹，
+        # 只是可能不前置；用 try/except 包住防止意外异常）
         try:
-            subprocess.run(['open', '-a', 'Finder'], env=clean_env, timeout=5)
-        except Exception:
-            pass
-        # 步骤2：纯 Standard Additions choose folder，Finder 已前置对话框自然靠前
+            subprocess.run(['open', '-a', 'Finder'], timeout=10)
+        except Exception as _e:
+            # Finder 激活失败不影响 choose folder 弹窗，仅记日志后忽略
+            with open('/tmp/rvc-pick-folder.log', 'a') as _log:
+                _log.write(f'[{datetime.datetime.now()}] open -a Finder 失败: {_e}\n')
+        # 第 2 步：纯 Standard Additions 弹窗（无 tell 其他 app，不需要自动化权限）
         try:
             result = subprocess.run(
                 ['osascript', '-e',
-                 'set f to choose folder',
+                 'set f to choose folder with prompt "选择视频目录"',
                  '-e', 'return POSIX path of f'],
                 capture_output=True, text=True, timeout=60, env=clean_env
             )
