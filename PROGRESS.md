@@ -1,6 +1,24 @@
 # PROGRESS - Reader 视频伴侣（浏览器播放器系统）
 
-> 更新：2026-08-01 安全修复（4 Critical）开工——任务 0 完成，基线 12/12 全绿。
+> 更新：2026-08-01 本地钩子检查闸门——静态+验收成为进入主干的唯一通路，推送 main 前必须通过。
+
+## 2026-08-01 本地钩子检查闸门（进入主干的唯一通路）
+
+### 变更（已完成）
+- 新增 `scripts/check.sh`：统一检查脚本。静态（秒级）：判卷三文件 sha256 冻结（acceptance.py=c1965638/test.html=4b79893e/sample.mp4=9b4a8281 + git diff HEAD 双保险）、node -c content.js、bash -n 四个 shell 脚本、py_compile server.py、emoji 扫描 server.py/start.sh；验收（分钟级）：清 profile（B1）→ ensure_server（8765 down 自动拉起，验后清理）→ acceptance.py，B9 flaky 失败自动重试一次（重试前再次 ensure_server）。
+- 新增 `scripts/install-hooks.sh`：安装/卸载钩子。`--uninstall` 回滚；紧急绕过 `git commit --no-verify` / `git push --no-verify`（绕过即失去唯一通路，事后须补跑）。回滚说明已写入 CLAUDE.md「检查与回滚」节。
+- 已安装 `.git/hooks/pre-commit`（`check.sh --static`）+ `.git/hooks/pre-push`（`check.sh` 全量）。钩子只在本机生效（git 不跟踪 .git/hooks/），机制随 scripts/ 提交进仓库。
+- CLAUDE.md：硬约束「改完立即 git 提交」→「改完先过检查再提交」（pre-commit 静态 + pre-push 全量验收）。
+
+### 验证
+- `scripts/check.sh --static`：11/11 全 PASS（sha256 冻结 4 项 + node -c + bash -n×4 + py_compile + emoji）。
+- 全量 `check.sh` ×3 次：验收 12/12 全绿（A-H；G1=210px G2=200px），EXIT=0。
+- pre-push 钩子手动触发（`bash .git/hooks/pre-push origin <url>`）：静态+验收全过，HOOK_EXIT=0。
+- 拉起路径实测：8765 down 时 check.sh 自动拉起 stream-server/start.sh（nohup + 轮询 15s），验收后清理监听进程 + 热键子进程（pkill --hotkey-child）。
+
+### 环境现象（记录备查，非本变更引入）
+- **Qoder CN 环境会自动拉起 server.py**（命令显示相对路径 `server.py`、父进程为 IDE 的 zsh 会话，如 21:07/21:09 两次；观测到 3 个 `--hotkey-child` 孤儿：17:00/17:35/21:04）。影响：check.sh 检测 8765 可能误判 up（环境瞬态实例），验收中途环境实例死亡致第一轮失败——已通过「重试前 ensure_server」兜底；孤儿进程残留是既有现象（设计上子进程 10 次 POST 失败自行退出，实测未退出，待查 server.py 重试间隔）。
+- 验收第一轮失败观察：`wait_for_selector('.rvc-folder-item')` 8s 超时（环境服务器中途死）+ 8899 `ERR_CONNECTION_REFUSED` 各一次，均瞬态，重试后 12/12。
 
 ## 2026-08-01 安全修复：4 个 Critical（任务书-修复4个Critical安全项）
 
