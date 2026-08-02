@@ -1554,16 +1554,19 @@
     if (key === state.keybindings.toggle_play) {
       e.preventDefault();
       e.stopImmediatePropagation();
+      if (Date.now() - (lastLocalKeyAt.toggle_play || 0) < SSE_DEDUPE_MS) return;
       markLocalKey('toggle_play');
       togglePlay();
     } else if (key === state.keybindings.back) {
       e.preventDefault();
       e.stopImmediatePropagation();
+      if (Date.now() - (lastLocalKeyAt.back || 0) < SSE_DEDUPE_MS) return;
       markLocalKey('back');
       elements.video.currentTime = Math.max(0, elements.video.currentTime - 1);
     } else if (key === state.keybindings.forward) {
       e.preventDefault();
       e.stopImmediatePropagation();
+      if (Date.now() - (lastLocalKeyAt.forward || 0) < SSE_DEDUPE_MS) return;
       markLocalKey('forward');
       elements.video.currentTime = Math.min(elements.video.duration || Infinity, elements.video.currentTime + 1);
     }
@@ -1603,12 +1606,15 @@
         // 以下 switch 在当前守卫下实际不可达（本地 keydown 全覆盖），保留结构供未来扩展
         switch (msg.action) {
           case 'toggle_play':
+            markLocalKey('toggle_play');
             togglePlay();
             break;
           case 'back':
+            markLocalKey('back');
             elements.video.currentTime = Math.max(0, elements.video.currentTime - 1);
             break;
           case 'forward':
+            markLocalKey('forward');
             elements.video.currentTime = Math.min(elements.video.duration || Infinity, elements.video.currentTime + 1);
             break;
         }
