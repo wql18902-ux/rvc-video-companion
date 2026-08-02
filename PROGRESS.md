@@ -1,6 +1,36 @@
 # PROGRESS - Reader 视频伴侣（浏览器播放器系统）
 
-> 更新：2026-08-02 技术方案 P0-P2 + 定位方案最终轮落地：fixed 居中图层 + z-index=45 + 隐藏不播放 + 无浏览器不抢键。
+> 更新：2026-08-02 热键边界 + 定位 4 bug 修复开工。
+
+## 2026-08-02 修复播放器热键边界 + 定位 4 个 bug（开工回执）
+
+- 目标：修 4 个 bug（SSE 后台出声 / 缩放跳位 / 隐藏态 SSE 仍响应 / 窗口缩小飘走），核心功能一字不动。
+- 基线核对（任务 0）：static 14/14 PASS；run_tests L0+L1+L2 全绿（L1=29 L2=5，skipped=0）；content.js = 1516 行。
+- 顺序：1 SSE 守卫 → 2 缩放归一化 → 3 隐藏态守卫 → 4 窗口回收 → 验收。
+- 白名单：content.js / PROGRESS.md / BLOCKED.md。tests/ + player.css + server.py 全冻结。
+- 最大风险：任务 2 归一化 margin-left 可能影响验收 G1/G2 拖拽位移测量（transform 路径未动，预期无影响）。
+
+### 完成记录（4 项修复 + 验收全过）
+
+**任务 1 + 3：SSE 热键边界修复 + 隐藏态守卫**（content.js SSE onmessage 内）
+- 修复前：`document.hasFocus()` 为 false 时反而放行执行 → 切到别的应用按 S/A/D 视频突然出声；播放器隐藏时 SSE 仍响应。
+- 修复后：5 层守卫依次拦截——(1) 浏览器无焦点 return；(2) 播放器 display:none return；(3) 焦点在 input/textarea/contentEditable return；(4) 浮层/按键面板打开 return；(5) 400ms 去重。SSE 连接保留（服务器据此判断客户端存活），switch 结构保留但当前守卫下不可达。
+- pynput 子进程 / 服务端 broadcast / L1 control-key 测试一字未动。
+
+**任务 2：缩放跳位修复**（content.js normalizePosition + resize mousedown + restoreLayout）
+- 修复前：首次缩放 `parseInt(player.style.left)||0` = 0（CSS left:50% 无 inline），写出 left:0px 覆盖居中 → 播放器跳左上角。
+- 修复后：新增 `normalizePosition()`——首次进入缩放/回收时用 getBoundingClientRect() 取真实视觉坐标，归零 margin-left 并写入等效 px，后续计算全用纯 px。restoreLayout 恢复 left 时同步归零 margin。幂等（已归一化则跳过）。
+
+**任务 4：窗口缩小回收**（content.js window resize 监听）
+- 修复前：窗口缩小后 fixed 播放器可能完全飘出可视区，无法找回。
+- 修复后：debounce 150ms 检测 boundingRect，超出视口时调 dragOffset 拉回（至少 100px 可见）+ normalizePosition + saveLayout。播放器隐藏/浏览器无焦点时跳过。
+
+### 验收
+- static 14/14 PASS / run_tests L0+L1(29)+L2(5) 全绿 / node -c 通过
+- grep hasFocus = 2 处（L881 窗口回收 + L1533 SSE 守卫）
+- emoji/字形符号扫描 content.js = 0
+- git diff 冻结文件（tests/ + player.css + server.py + manifest.json + background.js）= 空
+- content.js 1516 → 1567 行（+51：SSE 守卫重写 +15 / normalizePosition +13 / 窗口回收 +28 / restoreLayout margin +5 / 注释调整）
 
 ## 2026-08-02 播放器定位方案最终轮（fixed 居中图层）
 

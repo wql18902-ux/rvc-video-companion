@@ -681,6 +681,18 @@
     }
   }
 
+  // ========== 位置归一化（CSS 百分比居中 -> 纯 px） ==========
+  // 初始定位靠 CSS left:50% + margin-left:-210px 居中，无 inline left。
+  // 缩放/恢复需要纯 px 坐标系；首次进入时把等效 px 写入 inline 并归零 margin，
+  // 后续计算不再受百分比/margin 干扰，消除"第一次缩放跳到左上角"。
+  function normalizePosition() {
+    if (player.style.marginLeft === '0px' || player.style.marginLeft === '0') return; // 已归一化
+    const rect = player.getBoundingClientRect();
+    player.style.marginLeft = '0';
+    player.style.left = (rect.left - dragOffset.x) + 'px';
+    player.style.top = (rect.top - dragOffset.y) + 'px';
+  }
+
   // ========== 缩放功能（8方向） ==========
   let resizeDir = '';
 
@@ -688,6 +700,7 @@
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      normalizePosition(); // 首次缩放前归一化，防跳位
       state.isResizing = true;
       resizeDir = handle.dataset.dir;
       state.resizeStart.x = e.clientX;
@@ -844,7 +857,12 @@
         // width 下限保护：忽略 < 360 的异常窄值（fixed 时代残留的脏数据），让 CSS 默认 420px 生效
         if (data.width && data.width >= 360) player.style.width = data.width + 'px';
         if (data.height && data.height >= 160) player.style.height = data.height + 'px';
-        if (data.left) player.style.left = data.left + 'px';
+        // left/top 为纯 px（缩放归一化后保存的值）；恢复时同步归零 margin，
+        // 避免 CSS margin-left:-210px 与 px 叠加导致偏移
+        if (data.left) {
+          player.style.marginLeft = '0';
+          player.style.left = data.left + 'px';
+        }
         if (data.top) player.style.top = data.top + 'px';
         // transform 偏移边界保护：旧代码保存的偏移可能把播放器推到错误位置，
         // 超过 500px 视为异常，重置为 0（用户可重新拖拽到想要的位置）
@@ -854,6 +872,34 @@
       }).catch(() => {});
     } catch (e) {}
   }
+
+  // ========== 窗口缩小回收 ==========
+  // 窗口缩小时 fixed 播放器可能飘出可视区；debounce 检测并拉回（至少 100px 可见）
+  let resizeRecoverTimer = null;
+  window.addEventListener('resize', () => {
+    if (player.style.display === 'none') return;
+    if (!document.hasFocus()) return; // 用户没在看这个页面时不挪播放器
+    if (resizeRecoverTimer) clearTimeout(resizeRecoverTimer);
+    resizeRecoverTimer = setTimeout(() => {
+      if (player.style.display === 'none') return; // 等定时器期间可能被隐藏
+      const rect = player.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const MIN_VISIBLE = 100;
+      let dx = 0, dy = 0;
+      if (rect.left > vw - MIN_VISIBLE) dx = (vw - MIN_VISIBLE) - rect.left;
+      if (rect.right < MIN_VISIBLE) dx = MIN_VISIBLE - rect.right;
+      if (rect.top > vh - MIN_VISIBLE) dy = (vh - MIN_VISIBLE) - rect.top;
+      if (rect.bottom < MIN_VISIBLE) dy = MIN_VISIBLE - rect.bottom;
+      if (dx !== 0 || dy !== 0) {
+        normalizePosition(); // 归一化为纯 px，保存位置不依赖视口百分比
+        dragOffset.x += dx;
+        dragOffset.y += dy;
+        applyDragOffset();
+        saveLayout();
+      }
+    }, 150);
+  });
 
   // ========== 加载态 loading ==========
   function showLoading() {
@@ -1465,9 +1511,9 @@
   }, true);
 
   // ========== SSE 全局热键通道 ==========
-  // 仅当键盘控制开启 且 页面无焦点（用户不在 aim-read.top 当前 tab）时才响应 SSE。
-  // 页面有焦点时本地 keydown 会处理，跳过 SSE 避免双触发。
-  // 焦点在 input/textarea 时本地 keydown 被抑制，放行 SSE 保证输入时仍可控。
+  // 2026-08-02 边界修复：浏览器无焦点 / 播放器隐藏 / 焦点在输入框 / 浮层打开时一律不响应。
+  // 有效场景（页面聚焦 + 非输入态）本地 keydown 已全覆盖，SSE 不再执行播放动作。
+  // 连接本身保留（服务器据此判断有无客户端），pynput 子进程/服务端广播不动。
   // evtSource 为模块级单例：onerror 重连前必须 close 旧实例，防止双连接累积泄漏
   let sseSource = null;
   (function connectControlSSE() {
@@ -1483,13 +1529,19 @@
         if (!msg.action) return;
         if (!state.currentFile) return;
         if (!keyState.enabled) return;
-        if (document.hasFocus()) {
-          const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-          if (tag !== 'input' && tag !== 'textarea' && !(document.activeElement && document.activeElement.isContentEditable)) {
-            return; // 页面有焦点且不在输入框 - 本地 keydown 已处理，跳过
-          }
-        }
+        // 浏览器无焦点（切到别的应用/最小化）：不响应，防止突然出声
+        if (!document.hasFocus()) return;
+        // 播放器隐藏（用户点了关闭）：不响应（与本地 keydown 守卫对齐）
+        if (player.style.display === 'none') return;
+        // 焦点在输入框/可编辑区：不响应，打字就是打字
+        const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+        if (tag === 'input' || tag === 'textarea' || (document.activeElement && document.activeElement.isContentEditable)) return;
+        // 浮层/按键面板打开时不响应（与本地 keydown 一致）
+        if (folderOverlay.style.display === 'flex' || elements.treeOverlay.style.display === 'flex') return;
+        if (elements.keysPanel.style.display === 'block') return;
+        // 本地 keydown 已处理（400ms 去重窗口）：跳过
         if (Date.now() - (lastLocalKeyAt[msg.action] || 0) < SSE_DEDUPE_MS) return;
+        // 以下 switch 在当前守卫下实际不可达（本地 keydown 全覆盖），保留结构供未来扩展
         switch (msg.action) {
           case 'toggle_play':
             togglePlay();
