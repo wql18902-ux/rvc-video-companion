@@ -7,7 +7,7 @@ Chrome 扩展（MV3）+ 本地 ffmpeg 服务器，在 aim-read.top 阅读站嵌�
 ```bash
 # 启服务器（端口 8765）
 bash stream-server/start.sh
-# 或双击 packaging/dist/RVC视频伴侣.app
+# 或双击 stream-server/packaging/dist/RVC-Video-Companion.app
 
 # 加载扩展：chrome://extensions → 开发者模式 → 加载已解压 → reader-video-companion/
 # 使用：访问 aim-read.top，点扩展图标唤出浮窗播放器
@@ -55,23 +55,16 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 标准库 http.server（BaseHTTPRequ
 
 ## 当前状态
 
-v3.2.2（manifest.json 唯一版本源；main 最新 = 10949c2，已推送 origin/main；工作区另有未提交的 CLAUDE.md 规则收敛 + CI 改动）。
-- **2026-08-02 技术方案 P0-P2 全量落地（commit 10949c2）**：
-  - P0 安全稳定性：signal_handler 清理 hotkey_proc（防孤儿进程）；POST 请求体 1MB 限制（read_body）；SSE 空闲 30min 超时（MAX_SSE_IDLE）；B9 竞态根治（loadFileList dirOverride）；删除 /tmp/rvc-pick-folder.log
-  - P1 架构体验：转码 Seek 支持（进度条拖动重新请求 /api/stream?start=）；热键看门狗（120s 检测 + 自动重启）；打包版 version 修复（_MEIPASS 路径）；background.js 指数退避
-  - P2 可维护性：content.js api 命名空间（封装所有 fetch 调用）；state.currentDir 新增；player.css 分节注释
-- **2026-08-02 swift-thunder-newton 方案 P0-P2 已落地（commit 0152371）**：
-  - P0 文件选择 UX：删 `openFolderViaFinder()`，btnFolder/btnLoadMain 只 `showFolderOverlay()`（不自动弹 Finder）；浮层自动列上次目录 + loadFileList 带 seq 令牌守卫；dirPickBtn=「访达选择目录（macOS 高级选项）」；serve_pick_folder 用 `open -a Finder --hide` + Standard Additions choose folder
-  - P1 转码竞态：`/api/stream-error` 服务端长轮询（未就绪最多等 5s）；serve_stream finally 只 kill 本请求进程；客户端转码兜底超时 15s→10s
-  - P2 清理：删 LAYOUT_SCHEMA 迁移（restoreLayout 守卫兜底）；content.js 顶部模块注释
-  - P3 状态机简化**未做**（Archi ADR：单独立项，验收稳定后再评估）
-- **2026-08-02 启动脚本（6fbb3f9 + fc0e50b）**：.command 双击场景补 brew PATH；start.sh 增加 pynput 自检（缺失仅 WARN 不阻塞）
-- **2026-08-02 规则收敛（AGENTS.md 随 10949c2 入库；CLAUDE.md 收敛修改在工作区待提交）**：新增 AGENTS.md 硬约束唯一权威源（sha256 冻结 / emoji 禁令 / 版本唯一源 / 验收通路 / git 代理规则）；CLAUDE.md 硬约束 / 检查回滚 / 验收环境 / 代理规则改为指向 AGENTS.md 的指针，不再重复约束
-- **核心配置**：player.css `position: fixed; left:50%; margin-left:-210px; top:100px; z-index:45`（图层模式，不挤压文字，低于弹窗 z-50）；server.py pick-folder 用 `open -a Finder --hide` 两步弹窗；server.py 编码器 `libx264 -preset fast -crf 23`；content.js keys-panel 恢复（state.keybindings + chrome.storage.local）
-- **播放器定位演进**：sticky+float（挤压文字，flex/grid 下 float 失效）→ fixed 悬浮（被拒要夹心）→ 回退 sticky+float + wrapper（wrapper 破坏 sticky）→ 回退 sticky+float + findArticleContainer 跳过 flex/grid（SPA 时序导致插错容器）→ 最终确认 fixed 居中图层（用户要图层不挤压，z-index=45 低于弹窗 z-50）
-- **新增修复（定位方案最终轮）**：播放器隐藏时不自动播放（防出声不见画面）；服务端无 SSE 客户端时忽略热键（不抢键）；restoreLayout transform 边界检查（防旧偏移推偏位置）；rvc-toggle 用 container.contains(player) 检查容器（防 SPA 挪位）
+v3.2.2（manifest.json 唯一版本源；main = cdb204f，tag v3.2.2 已同步；工作区干净）。
+- **Release 已发布**：GitHub Release v3.2.2，资产 `RVC-Video-Companion.zip`（25MB，含最新 .app + 扩展 + 安装说明）。源码包（Source code zip/tar.gz）tag 已移至最新 commit。
+- **2026-08-02 下午修复轮（5aa4676 → cdb204f，共 5 commit）**：
+  - 热键边界 + 缩放跳位 + 隐藏态守卫 + 窗口回收（4 bug）
+  - 浏览按钮 serverOnline 竞态（首次点击无响应 → 先尝试连接再反馈）
+  - 全部文件名/资产名改 ASCII 英文（防 GitHub 剥离中文名）
+  - 移除 `open -a Finder --hide`（弹浏览前不再闪出普通访达窗口）
+  - 安装说明重写（清晰分步 + 源码版注意事项 + FAQ）
+- **核心配置**：player.css `position: fixed; left:50%; margin-left:-210px; top:100px; z-index:45`（图层模式，不挤压文字，低于弹窗 z-50）；server.py pick-folder 用纯 osascript `choose folder`（系统级对话框，无需激活 Finder）；server.py 编码器 `libx264 -preset fast -crf 23`；content.js keys-panel（state.keybindings + chrome.storage.local）
 - **历史根因（保留备查）**：pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL。已拆 `--hotkey-child` 子进程隔离。每次重打包 .app 后输入监控权限失效（adhoc 签名按二进制哈希记账），需重新授权
-- **验收环境（2026-08-02 实测）**：坑位与必守命令（清 profile / 清代理 env / 同命令拉起 8765 / TRAE PYTHONHOME / H 步 emoji 扫描）已收敛至 AGENTS.md「验收通路」，此处不重复
-- **打包版待办**：dist 的 .app/zip 仍是 04:45 旧版（不含 0152371/6fbb3f9/fc0e50b），**需重建**（跑 build.sh + make-distro.sh，沙箱拦 rm -rf 需用户终端跑）后发新 release。Release 现有：v3.2.2（Latest，10:03）+ v3.2.2-test（Pre-release，19:25）
+- **验收环境**：坑位与必守命令已收敛至 AGENTS.md「验收通路」，此处不重复
 - 运行态：双击 .app **无终端窗口**（后台运行），重复双击无副作用（端口检测后退出）；停止 `lsof -ti:8765 | xargs kill`
-- **git 代理规则**（三态命令 / 禁 HTTPS_PROXY env 推送 / gh CLI 走 env / workflow scope）：权威源为 AGENTS.md「git 代理规则」，此处不重复（设备流程，需 TTY，agent 内后台跑不出验证码，让用户在终端跑或前台跑等浏览器授权）
+- **git 代理规则**：权威源为 AGENTS.md「git 代理规则」，此处不重复
