@@ -1,6 +1,14 @@
 # PROGRESS - Reader 视频伴侣（浏览器播放器系统）
 
-> 更新：2026-08-02 热键边界 + 定位 4 bug 修复开工。
+> 更新：2026-08-02 晚间 v3.2.3：MP3 音频播放 + 热键两 bug 修复（详见 CLAUDE.md「当前状态」）。
+
+## 2026-08-02 晚间 v3.2.3 三提交（b29531b → d13b711）
+
+- **b29531b feat(audio)**：MP3/音频原生播放——server.py AUDIO_EXTS 分流（音频直接回原始字节流含 Range，不经 ffmpeg），content.js 音频模式（video.src 直连 + 占位 UI），控制条/倍速/热键/进度全复用；L1 +8、L2 +3。验证 L0 14/14 + L1 37/37 + L2 8/8 + QA 独立验证 5 项（音频原生流/六扩展名/Range 206/鉴权不绕过/视频仍转码）NoOne。
+- **6e7a01e fix(hotkey)**：togglePlay 异步竞态（play() pending 期间 paused 仍 true → 过渡期热键不灵敏）→ playPending 过渡锁 + 两处复位。QA Playwright 行为验证 11/11。
+- **d13b711 fix(hotkey)**：本地 keydown 与 SSE 双通道去重不对称 → 一次按键双触发（时灵时不灵/图标闪跳）→ keydown 三分支对称去重 + SSE 三分支执行前 markLocalKey。QA 时序验证 14/14（两种先后时序均 1 次执行、399ms 拦/400ms 放、连按 6 次仅放行 1 次）。
+- 状态：main 已含三提交，**推送 + 打包 + Release v3.2.3 进行中**。
+
 
 ## 2026-08-02 修复播放器热键边界 + 定位 4 个 bug（开工回执）
 

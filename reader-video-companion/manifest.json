@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RVC 视频伴侣",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "description": "嵌入式视频播放器，文字自动环绕，支持 MKV/MOV 实时转码（需启动本地服务器）",
   "permissions": [
     "storage",

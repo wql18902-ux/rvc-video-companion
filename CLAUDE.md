@@ -55,15 +55,13 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 标准库 http.server（BaseHTTPRequ
 
 ## 当前状态
 
-v3.2.2（manifest.json 唯一版本源；main = cdb204f，tag v3.2.2 已同步；工作区干净）。
-- **Release 已发布**：GitHub Release v3.2.2，资产 `RVC-Video-Companion.zip`（25MB，含最新 .app + 扩展 + 安装说明）。源码包（Source code zip/tar.gz）tag 已移至最新 commit。
-- **2026-08-02 下午修复轮（5aa4676 → cdb204f，共 5 commit）**：
-  - 热键边界 + 缩放跳位 + 隐藏态守卫 + 窗口回收（4 bug）
-  - 浏览按钮 serverOnline 竞态（首次点击无响应 → 先尝试连接再反馈）
-  - 全部文件名/资产名改 ASCII 英文（防 GitHub 剥离中文名）
-  - 移除 `open -a Finder --hide`（弹浏览前不再闪出普通访达窗口）
-  - 安装说明重写（清晰分步 + 源码版注意事项 + FAQ）
-- **核心配置**：player.css `position: fixed; left:50%; margin-left:-210px; top:100px; z-index:45`（图层模式，不挤压文字，低于弹窗 z-50）；server.py pick-folder 用纯 osascript `choose folder`（系统级对话框，无需激活 Finder）；server.py 编码器 `libx264 -preset fast -crf 23`；content.js keys-panel（state.keybindings + chrome.storage.local）
+v3.2.3（manifest.json 唯一版本源；main 待推送 b29531b→d13b711，tag v3.2.3 发布后同步）。
+- **v3.2.3 新增（2026-08-02 晚间，b29531b → d13b711 共 3 commit）**：
+  - **MP3/音频播放**（b29531b）：server.py 按扩展名分流——.mp3/.m4a/.aac/.wav/.flac/.ogg 直接回原始字节流（浏览器原生播放，零转码，含 Range），视频转码路径一字未动；content.js 音频模式（video.src 直连 + 音频占位 UI），控制条/倍速/热键/进度全复用；L1 +8、L2 +3 用例
+  - **热键过渡期不灵敏修复**（6e7a01e）：togglePlay 加 playPending 过渡锁，play() 异步 pending 期间忽略重复触发
+  - **热键双触发修复**（d13b711）：本地 keydown 与 SSE 全局热键双通道去重不对称导致一次按键两次切换（时灵时不灵/图标闪跳），双通道对称去重
+- **Release 状态**：v3.2.2 为 Latest（旧构建，不含以上 3 commit）；v3.2.3 打包发布后更新此节
+- **核心配置**：player.css `position: fixed; left:50%; margin-left:-210px; top:100px; z-index:45`（图层模式，不挤压文字，低于弹窗 z-50）；server.py pick-folder 用纯 osascript `choose folder`（系统级对话框，无需激活 Finder）；server.py 编码器 `libx264 -preset fast -crf 23`；content.js keys-panel（state.keybindings + chrome.storage.local）；音频分流 AUDIO_EXTS
 - **历史根因（保留备查）**：pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL。已拆 `--hotkey-child` 子进程隔离。每次重打包 .app 后输入监控权限失效（adhoc 签名按二进制哈希记账），需重新授权
 - **验收环境**：坑位与必守命令已收敛至 AGENTS.md「验收通路」，此处不重复
 - 运行态：双击 .app **无终端窗口**（后台运行），重复双击无副作用（端口检测后退出）；停止 `lsof -ti:8765 | xargs kill`
