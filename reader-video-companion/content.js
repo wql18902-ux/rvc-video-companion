@@ -13,6 +13,9 @@
 
   const SERVER = 'http://127.0.0.1:8765';
 
+  // 音频扩展名集合：浏览器原生支持，/api/stream 直接回原始字节流（不经 ffmpeg 转码）
+  const AUDIO_EXTS = ['.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg'];
+
   // ========== API 命名空间：封装所有对本地服务器的 fetch 调用 ==========
   const api = {
     health: () => fetch(SERVER + '/api/health').then(r => r.json()),
@@ -25,6 +28,8 @@
       if (start && start > 0) url += '&start=' + start;
       return url;
     },
+    // 音频原生直发：与 streamUrl 同一路由，但不带 req 参数（音频不启动 ffmpeg、无转码日志）
+    audioUrl: (file, dir) => SERVER + '/api/stream?file=' + encodeURIComponent(file) + '&dir=' + encodeURIComponent(dir),
     streamError: (reqId) => fetch(SERVER + '/api/stream-error?req=' + encodeURIComponent(reqId)).then(r => r.json()),
     setKeybindings: (kb) => fetch(SERVER + '/api/set-keybindings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kb)
@@ -44,6 +49,7 @@
     skipForward: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></svg>',
     package: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
     film: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M3 12h4M3 16.5h4M17 7.5h4M17 12h4M17 16.5h4"/></svg>',
+    music: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
     alert: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>',
     hourglass: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.41L12 12 7.59 16.42A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.41L12 12l4.41-4.42A2 2 0 0 0 17 6.17V2"/></svg>',
     pin: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z"/></svg>'
@@ -71,6 +77,7 @@
     serverOnline: false,
     currentFile: null,
     currentDir: null,      // 当前播放文件所在目录（seek 重新加载时用，避免 dirInput 已被修改）
+    isAudio: false,        // 当前文件是否为音频模式（原生播放，不经 mpegts/ffmpeg）
     pinnedDirs: [],         // 固定目录列表（LRU，最前为最近使用，上限 8）
     videoRatio: null,       // 视频宽高比 w/h（loadedmetadata 时更新，null 表示无视频）
     keybindings: { toggle_play: 's', back: 'a', forward: 'd' }  // 自定义按键（chrome.storage.local 持久化）
@@ -146,6 +153,12 @@
           <button class="rvc-load-btn">${ICON.folder} 加载视频</button>
         </div>
         <video class="rvc-video" style="display: none;"></video>
+        <div class="rvc-audio-placeholder" style="display:none;">
+          <span class="rvc-audio-icon">${ICON.music}</span>
+          <span class="rvc-audio-title">音频播放中</span>
+          <span class="rvc-audio-name"></span>
+          <span class="rvc-audio-hint">倍速 / 进度条 / A/S/D 快捷键可用</span>
+        </div>
       </div>
       <div class="rvc-controls" style="display: none;">
         <button class="rvc-control-btn rvc-btn-play" title="播放/暂停">${ICON.play}</button>
@@ -303,6 +316,8 @@
     controls: player.querySelector('.rvc-controls'),
     video: player.querySelector('.rvc-video'),
     placeholder: player.querySelector('.rvc-placeholder'),
+    audioPlaceholder: player.querySelector('.rvc-audio-placeholder'),
+    audioName: player.querySelector('.rvc-audio-name'),
     progress: player.querySelector('.rvc-progress'),
     progressBar: player.querySelector('.rvc-progress-bar'),
     timeDisplay: player.querySelector('.rvc-time'),
@@ -529,7 +544,7 @@
         return;
       }
       if (!data.files || data.files.length === 0) {
-        elements.folderStatus.textContent = '该目录没有视频文件';
+        elements.folderStatus.textContent = '该目录没有视频/音频文件';
         return;
       }
       if (seq !== fileListSeq) return;
@@ -542,12 +557,14 @@
         item.className = 'rvc-folder-item';
         const sizeMB = (f.size / 1024 / 1024).toFixed(1);
         const needTranscode = ['.mkv', '.mov', '.avi', '.flv'].includes(f.ext);
+        const isAudio = AUDIO_EXTS.includes(f.ext);
+        const fileIcon = isAudio ? ICON.music : (needTranscode ? ICON.package : ICON.film);
         const tags = detectVersionTags(f.name);
         item.innerHTML = `
-          <span class="rvc-folder-icon">${needTranscode ? ICON.package : ICON.film}</span>
+          <span class="rvc-folder-icon">${fileIcon}</span>
           <div class="rvc-folder-info">
             <div class="rvc-folder-name">${escapeHtml(f.name)}${renderVersionTags(tags)}</div>
-            <div class="rvc-folder-meta">${escapeHtml(f.ext.toUpperCase())} · ${sizeMB} MB${needTranscode ? ' · 转码播放' : ''}</div>
+            <div class="rvc-folder-meta">${escapeHtml(f.ext.toUpperCase())} · ${sizeMB} MB${needTranscode ? ' · 转码播放' : (isAudio ? ' · 原生播放' : '')}</div>
           </div>
         `;
         item.addEventListener('click', () => {
@@ -814,6 +831,8 @@
 
   elements.header.addEventListener('mousedown', (e) => startDrag(e, false));
   elements.video.addEventListener('mousedown', (e) => startDrag(e, true));
+  // 音频占位同视频本体：按住拖动播放器，未过阈值松手视为单击切播放/暂停
+  elements.audioPlaceholder.addEventListener('mousedown', (e) => startDrag(e, true));
 
   document.addEventListener('mousemove', (e) => {
     if (state.isResizing || !drag.active) return;
@@ -913,15 +932,16 @@
   });
 
   // ========== 加载态 loading ==========
-  function showLoading() {
+  function showLoading(text) {
     let loader = elements.body.querySelector('.rvc-loading');
     if (!loader) {
       loader = document.createElement('div');
       loader.className = 'rvc-loading';
-      loader.innerHTML = ICON.hourglass + ' 转码中...';
       loader.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:14px;z-index:5;background:rgba(0,0,0,0.7);padding:8px 16px;border-radius:6px;';
       elements.body.appendChild(loader);
     }
+    // 每次调用都更新文案（音频模式显示"加载音频中"，视频模式默认"转码中..."）
+    loader.innerHTML = ICON.hourglass + ' ' + (text || '转码中...');
     loader.style.display = 'block';
   }
 
@@ -965,6 +985,25 @@
     setupMediaSession(filename);
 
     const ext = (filename.split('.').pop() || '').toLowerCase();
+    const isAudio = AUDIO_EXTS.includes('.' + ext);
+
+    if (isAudio) {
+      // 音频模式：浏览器原生播放，video.src 直连 /api/stream（服务端回原始字节流），
+      // 不创建 mpegts 实例、不走转码错误通道；控制条/倍速/进度条/A-S-D 复用视频逻辑
+      state.currentReqId = null;
+      state.isAudio = true;
+      showLoading('加载音频中...');
+      elements.video.style.display = 'none';
+      elements.audioPlaceholder.style.display = 'flex';
+      elements.audioName.textContent = filename;
+      elements.video.src = api.audioUrl(filename, dir);
+      finishLoad(filename, dir);
+      return;
+    }
+
+    // 视频路径：隐藏音频占位、显示视频元素
+    state.isAudio = false;
+    elements.audioPlaceholder.style.display = 'none';
 
     if (['mp4', 'm4v', 'webm'].includes(ext)) {
       state.currentReqId = null;   // 原生直发不走转码通道
@@ -1053,7 +1092,7 @@
   function showPlayHint(persistent) {
     const hint = document.createElement('div');
     hint.className = 'rvc-play-hint';
-    hint.innerHTML = ICON.play + ' 点击播放视频';
+    hint.innerHTML = ICON.play + ' 点击播放' + (state.isAudio ? '音频' : '视频');
     hint.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;cursor:pointer;z-index:5;';
     elements.body.appendChild(hint);
     hint.addEventListener('click', () => {
@@ -1310,10 +1349,12 @@
     elements.video.src = '';
     elements.video.style.display = 'none';
     elements.placeholder.style.display = 'flex';
+    elements.audioPlaceholder.style.display = 'none';
     elements.controls.style.display = 'none';
     elements.resizeHandles.forEach(h => h.style.display = 'none');
     player.classList.add('rvc-empty');
     state.isPlaying = false;
+    state.isAudio = false;
     state.currentFile = null;
     state.currentDir = null;
     updatePlayButton();

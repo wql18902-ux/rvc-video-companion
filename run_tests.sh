@@ -10,7 +10,7 @@
 # 分层（从快到慢，从隔离到真实）：
 #   L0 静态 + 哈希核对：scripts/check.sh --static（冻结校验 + 语法 + emoji）
 #   L1 单测/集成：tests/test_server_api.py（随机端口 + fake ffmpeg，29 用例）
-#   L2 真实进程 E2E：tests/e2e_extra.py（真实 server.py + 真实 ffmpeg，5 用例；
+#   L2 真实进程 E2E：tests/e2e_extra.py（真实 server.py + 真实 ffmpeg，8 用例；
 #      8765 被占用时自动改独立测试端口，绝不打断用户播放）
 #   L3 验收（--full 才跑）：scripts/check.sh 全量（acceptance.py 冻结基准，分钟级）
 #
@@ -82,7 +82,7 @@ fi
 # ---------- L2 真实进程 E2E（真实 ffmpeg） ----------
 note "L2 真实进程 E2E（tests/e2e_extra.py）"
 if run_py tests/e2e_extra.py >/tmp/rvc-l2.log 2>&1; then
-  ok "L2：5 用例全绿（转码失败/端口占用/播放中断/正向对照）"
+  ok "L2：$(grep -c '^test_' /tmp/rvc-l2.log 2>/dev/null || echo 8) 用例全绿（转码失败/端口占用/播放中断/正向对照/音频分流）"
 else
   bad "L2 未通过（详见 /tmp/rvc-l2.log）"
   tail -30 /tmp/rvc-l2.log

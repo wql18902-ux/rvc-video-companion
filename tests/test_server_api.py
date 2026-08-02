@@ -4,8 +4,9 @@
 覆盖（对应受影响路由）：
 - 鉴权/CORS -> 全部 /api/*：白名单 Origin 放行、evil Origin 403、扩展 ID 精确匹配、无 Origin 时 Host 校验
 - 路径校验 -> /api/file /api/stream /api/duration：safe_join 穿越、非视频扩展、越界 404
-- 目录列表 -> /api/files /api/tree：缺失目录、仅视频文件
+- 目录列表 -> /api/files /api/tree：缺失目录、仅视频文件、音频文件入列
 - 时长探测 -> /api/duration：文件不存在
+- 音频分流 -> /api/stream：音频扩展名原生直发（原始字节流 + 不触发 ffmpeg）、Range 206、鉴权不绕过、穿越/缺失 404、视频仍走转码
 - 热键 -> POST /api/control-key：合法 action、bad json、unknown action
 - 转码错误查询 -> /api/stream-error：未知 req、fake ffmpeg 失败后的结构化错误码
 - 负向-转码失败 -> /api/stream /api/stop：fake ffmpeg（立即退出 / 二进制缺失）-> 200 空流 + 错误码可查 + 服务器存活
@@ -177,6 +178,123 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(resp.status, 206)
         self.assertEqual(len(data), 100)
         self.assertEqual(resp.getheader('Content-Range'), f'bytes 0-99/65536')
+
+    # ---------- 音频分流（受影响路由：/api/stream，音频原生直发不触发 ffmpeg） ----------
+    def test_audio_stream_native_no_ffmpeg(self):
+        # 音频扩展名走 /api/stream 原生直发：返回原始字节流 + 正确 Content-Type，
+        # 且 ffmpeg_cmd 全程不被调用（证明不启动 ffmpeg）
+        audio = os.path.join(self.tmp, 'audio.mp3')
+        payload = b'ID3\x04\x00\x00\x00\x00\x00\x00' + os.urandom(4096)
+        with open(audio, 'wb') as f:
+            f.write(payload)
+        calls = []
+
+        def boom(name):
+            calls.append(name)
+            raise AssertionError('音频分流不应调用 ffmpeg')
+
+        server.ffmpeg_cmd = boom
+        try:
+            conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+            conn.request('GET', f'/api/stream?dir={self.tmp}&file=audio.mp3',
+                         headers={'Host': f'127.0.0.1:{self.port}'})
+            resp = conn.getresponse()
+            data = resp.read()
+            conn.close()
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.getheader('Content-Type'), 'audio/mpeg')
+            self.assertEqual(resp.getheader('Accept-Ranges'), 'bytes')
+            self.assertEqual(data, payload)   # 原始字节流，非 MPEG-TS
+        finally:
+            server.ffmpeg_cmd = self._orig_ffmpeg_cmd
+        self.assertEqual(calls, [])
+
+    def test_audio_stream_multiple_exts(self):
+        # 至少覆盖 mp3/m4a/aac/wav/flac/ogg 六种扩展名全部走原生直发
+        for ext, ctype in [('.mp3', 'audio/mpeg'), ('.m4a', 'audio/mp4'),
+                           ('.aac', 'audio/aac'), ('.wav', 'audio/wav'),
+                           ('.flac', 'audio/flac'), ('.ogg', 'audio/ogg')]:
+            p = os.path.join(self.tmp, 't' + ext)
+            with open(p, 'wb') as f:
+                f.write(b'x' * 128)
+            status, data = self.request('GET', f'/api/stream?dir={self.tmp}&file=t{ext}')
+            self.assertEqual(status, 200, f'{ext} 应返回 200')
+            self.assertEqual(data, b'x' * 128, f'{ext} 应返回原始字节流')
+
+    def test_audio_stream_range_206(self):
+        audio = os.path.join(self.tmp, 'audio.flac')
+        payload = os.urandom(65536)
+        with open(audio, 'wb') as f:
+            f.write(payload)
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+        conn.request('GET', f'/api/stream?dir={self.tmp}&file=audio.flac',
+                     headers={'Host': f'127.0.0.1:{self.port}',
+                              'Range': 'bytes=100-199'})
+        resp = conn.getresponse()
+        data = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 206)
+        self.assertEqual(len(data), 100)
+        self.assertEqual(data, payload[100:200])
+        self.assertEqual(resp.getheader('Content-Range'), f'bytes 100-199/65536')
+
+    def test_audio_stream_auth_not_bypassed(self):
+        # 音频分流同样过鉴权：evil Origin 一律 403，不允许绕过
+        audio = os.path.join(self.tmp, 'audio.wav')
+        with open(audio, 'wb') as f:
+            f.write(b'RIFF' + os.urandom(256))
+        status, _ = self.request('GET', f'/api/stream?dir={self.tmp}&file=audio.wav',
+                                 headers={'Origin': 'https://evil.com'})
+        self.assertEqual(status, 403)
+
+    def test_audio_stream_traversal_404(self):
+        status, _ = self.request('GET', '/api/stream?dir=/&file=etc/audio.mp3')
+        self.assertEqual(status, 404)
+
+    def test_audio_stream_missing_404(self):
+        status, _ = self.request('GET', f'/api/stream?dir={self.tmp}&file=nope.mp3')
+        self.assertEqual(status, 404)
+
+    def test_video_stream_still_transcodes(self):
+        # 视频扩展名走 /api/stream 仍走转码通道（fake ffmpeg 立即退出 -> 错误可查），
+        # 证明音频分流没有改变视频路径
+        v = os.path.join(self.tmp, 'video.mp4')
+        with open(v, 'wb') as f:
+            f.write(os.urandom(4096))
+        req_id = 'l1vid-%d' % int(time.time() * 1000)
+        server.ffmpeg_cmd = lambda name: self.fake_ffmpeg  # noqa: E731
+        try:
+            conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+            conn.request('GET', f'/api/stream?dir={self.tmp}&file=video.mp4&req={req_id}',
+                         headers={'Host': f'127.0.0.1:{self.port}'})
+            resp = conn.getresponse()
+            data = resp.read()
+            conn.close()
+            self.assertIn(resp.status, (200, 500))
+            if resp.status == 200:
+                self.assertEqual(data, b'')
+            self.assertEqual(resp.getheader('X-RVC-Request-Id'), req_id)
+            # 错误结果落盘可查（与生产播放端重试逻辑一致）
+            result = None
+            for _ in range(5):
+                status, payload = self.get_json(f'/api/stream-error?req={req_id}')
+                if payload.get('ok'):
+                    result = payload
+                    break
+                time.sleep(0.2)
+            self.assertIsNotNone(result, 'stream-error 结果未就绪')
+            self.assertEqual(result['code'], 'TRANSCODE_FAILED')
+        finally:
+            server.ffmpeg_cmd = self._orig_ffmpeg_cmd
+
+    def test_files_lists_audio_too(self):
+        # /api/files 现在同时列出音频文件（列表入口支持音频选择）
+        with open(os.path.join(self.tmp, 'song.mp3'), 'wb') as f:
+            f.write(b'ID3')
+        status, data = self.get_json(f'/api/files?dir={self.tmp}')
+        self.assertEqual(status, 200)
+        names = [x['name'] for x in data['files']]
+        self.assertIn('song.mp3', names)
 
     # ---------- 目录列表 / 树 / 时长 ----------
     def test_files_missing_dir(self):

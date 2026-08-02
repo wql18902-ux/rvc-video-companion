@@ -6,6 +6,7 @@
 - 端口占用：8765 被占时启动 server.py -> 打印「已在运行」并退出 0（幂等启动）
 - 播放中断：/api/stream 读一半断开 -> 服务器存活、/api/stop 正常；/api/control SSE 断连 -> 广播仍正常
 - 正向对照组：sample.mp4 真实转码出流 >0 字节（证明 L2 自身链路有效）
+- 音频分流：mp3/wav 走 /api/stream 原生直发（原始字节流 + Range 206），视频仍走转码
 
 双模式：
 - 8765 空闲：直接起真实 server.py 子进程（最真实）
@@ -260,6 +261,44 @@ class TestE2EExtra(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data['ok'])
         conn2.close()
+
+    # ---------- 正向：音频原生直发（受影响路由：/api/stream 音频分流） ----------
+    def test_audio_native_stream_bytes(self):
+        # 真实 server 进程：mp3 走 /api/stream 返回原始字节流（非 TS 流），Content-Type audio/mpeg
+        audio = os.path.join(self.tmp, 'audio.mp3')
+        payload = b'ID3\x04\x00\x00\x00\x00\x00\x00' + os.urandom(8192)
+        with open(audio, 'wb') as f:
+            f.write(payload)
+        status, headers, body = http_get(
+            f'/api/stream?dir={self.tmp}&file=audio.mp3', timeout=15)
+        self.assertEqual(status, 200)
+        self.assertEqual(dict(headers).get('Content-Type'), 'audio/mpeg')
+        self.assertEqual(body, payload)   # 逐字节一致，证明未经过 ffmpeg 转码
+
+    def test_audio_native_stream_range(self):
+        # 音频 Range 分段：206 + 指定区间字节（浏览器原生 seek 依赖）
+        audio = os.path.join(self.tmp, 'audio.wav')
+        payload = os.urandom(65536)
+        with open(audio, 'wb') as f:
+            f.write(payload)
+        port = int(BASE.rsplit(':', 1)[1])
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=10)
+        conn.request('GET', quote(f'/api/stream?dir={self.tmp}&file=audio.wav', safe='/?&=:'),
+                     headers={'Host': f'127.0.0.1:{port}', 'Range': 'bytes=0-99'})
+        resp = conn.getresponse()
+        data = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 206)
+        self.assertEqual(data, payload[:100])
+
+    def test_audio_then_video_still_transcodes(self):
+        # 音频分流后视频路径不受影响：sample.mp4 仍走 ffmpeg 转码出 MPEG-TS 流
+        req_id = 'e2e-aft-%d' % int(time.time() * 1000)
+        status, headers, body = http_get(
+            f'/api/stream?dir={ROOT}/tests/fixtures&file=sample.mp4&req={req_id}', timeout=60)
+        self.assertEqual(status, 200)
+        self.assertEqual(dict(headers).get('Content-Type'), 'video/mp2t')
+        self.assertGreater(len(body), 4096)
 
     # ---------- 正向对照组：真实转码链路有效（L2 自身有效性） ----------
     def test_transcode_smoke_positive(self):

@@ -37,6 +37,16 @@ ALLOWED_ORIGINS = {
 ALLOWED_HOSTS = {'127.0.0.1:8765', 'localhost:8765'}
 # serve_file（原生直发）只允许浏览器可直播的扩展名
 SERVE_FILE_EXTS = {'.mp4', '.m4v', '.webm'}
+# 音频扩展名：浏览器原生支持，/api/stream 命中时直接回原始字节流（含 Range），不启动 ffmpeg
+AUDIO_EXTS = {'.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg'}
+AUDIO_CONTENT_TYPES = {
+    '.mp3': 'audio/mpeg',
+    '.m4a': 'audio/mp4',
+    '.aac': 'audio/aac',
+    '.wav': 'audio/wav',
+    '.flac': 'audio/flac',
+    '.ogg': 'audio/ogg',
+}
 # SSE 最大并发连接数（防线程耗尽，每连接占一线程）
 MAX_SSE_CLIENTS = 10
 # POST 请求体大小上限（字节），防止恶意超大 Content-Length 耗尽内存
@@ -572,7 +582,7 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         files = []
         for f in sorted(os.listdir(dir_path)):
             ext = os.path.splitext(f)[1].lower()
-            if ext in VIDEO_EXTS and not f.endswith('.downloading'):
+            if (ext in VIDEO_EXTS or ext in AUDIO_EXTS) and not f.endswith('.downloading'):
                 full = os.path.join(dir_path, f)
                 try:
                     size = os.path.getsize(full)
@@ -706,6 +716,11 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             '.webm': 'video/webm',
         }.get(ext, 'application/octet-stream')
 
+        self.serve_raw_file(full_path, ctype)
+
+    def serve_raw_file(self, full_path, ctype):
+        """原生直发任意文件字节流（视频原生直发与音频分流共用）：
+        支持 HTTP Range 分段；客户端暂停/拖动进度主动断开时静默收尾。"""
         size = os.path.getsize(full_path)
         range_header = self.headers.get('Range')
 
@@ -858,6 +873,16 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
 
         if not os.path.isfile(full_path):
             self.send_error(404)
+            return
+
+        # 音频分流：浏览器原生格式直接回原始字节流（含 Range 分段），不启动 ffmpeg。
+        # 鉴权（check_origin）与路径校验（safe_join）已在 do_GET/本方法上方统一执行，未绕过。
+        ext = os.path.splitext(full_path)[1].lower()
+        if ext in AUDIO_EXTS:
+            # 终止旧转码进程：用户从视频切到音频时释放 ffmpeg，避免残留进程
+            kill_current_proc()
+            ctype = AUDIO_CONTENT_TYPES.get(ext, 'application/octet-stream')
+            self.serve_raw_file(full_path, ctype)
             return
 
         # 终止旧进程
