@@ -630,27 +630,11 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """弹出原生文件选择对话框，选择视频目录。
         成功返回 {ok:true,dir:/abs/path/}；用户取消返回 {cancelled:true}；
         超时/报错返回 {ok:false,error:...}。"""
-        # 分两步弹窗，规避打包版 TCC「自动化」授权缺失问题：
-        # 第 1 步用 LaunchServices（open 命令）把 Finder 带到前台，不涉及
-        # Apple Events 通信，不需要自动化授权；第 2 步用纯 Standard Additions
-        # 的 choose folder（无 tell 其他 app），同样不需要自动化权限。
-        # 为什么不用 tell application "Finder" to activate：那是 Apple Events
-        # 通信，打包版 .app 是无 TCC「自动化」授权的新签名二进制，Finder 会拒绝
-        # 该事件报 -1708（errAEEventNotHandled）；源码版从终端跑继承终端授权
-        # 所以正常。为什么不用 tell System Events：会触发 -1743
-        # （errAEEventNotPermitted）权限弹窗。
+        # 纯 Standard Additions 的 choose folder（无 tell 其他 app），不需要
+        # TCC「自动化」授权。osascript 弹窗是系统级对话框，始终置顶，
+        # 不需要先激活 Finder（之前用 open -a Finder --hide 会闪出一个
+        # 普通访达窗口，造成用户困惑，已移除）。
         clean_env = {k: v for k, v in os.environ.items() if k not in ('PYTHONHOME', 'PYTHONPATH')}
-        # 第 1 步：LaunchServices 激活 Finder 到前台（open 命令不需要 Apple Events 授权；
-        # 不检查 returncode——Finder 激活失败也不阻塞弹窗，choose folder 仍会弹，
-        # 只是可能不前置；用 try/except 包住防止意外异常）
-        # --hide：隐藏 Finder 窗口（choose folder 是 osascript 独立对话框，不受 Finder
-        # 可见性影响），避免 Finder 抢前台遮挡真正的选择对话框（修复 B1 断裂点）
-        try:
-            subprocess.run(['open', '-a', 'Finder', '--hide'], timeout=10)
-        except Exception:
-            # Finder 激活失败不影响 choose folder 弹窗，忽略
-            pass
-        # 第 2 步：纯 Standard Additions 弹窗（无 tell 其他 app，不需要自动化权限）
         try:
             result = subprocess.run(
                 ['osascript', '-e',
