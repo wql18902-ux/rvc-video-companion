@@ -13,7 +13,7 @@ set -euo pipefail
 # --- 配置 ---
 GITHUB_REPO="wql18902-ux/rvc-video-companion"
 ZIP_NAME="RVC-Video-Companion.zip"
-INSTALL_DIR="$HOME/Applications/RVC视频伴侣"
+INSTALL_DIR="$HOME/Applications/RVC-Video-Companion"
 ZIP_FILE="/tmp/$ZIP_NAME"
 
 # 多源 fallback（国内 GitHub 慢时自动切镜像）
@@ -65,7 +65,7 @@ ditto -xk "$ZIP_FILE" "$INSTALL_DIR"
 rm -f "$ZIP_FILE"
 
 # 处理 zip 内可能有的嵌套目录（zip 解压后可能多一层文件夹）
-NESTED="$(find "$INSTALL_DIR" -maxdepth 1 -type d -name "RVC视频伴侣*" | head -1)"
+NESTED="$(find "$INSTALL_DIR" -maxdepth 1 -type d -name "RVC-Video-Companion*" | head -1)"
 if [ -n "$NESTED" ] && [ "$NESTED" != "$INSTALL_DIR" ]; then
   # 把嵌套内容提上来（find -mindepth 1 避免匹配 . 和 ..）
   find "$NESTED" -mindepth 1 -maxdepth 1 -exec mv {} "$INSTALL_DIR"/ \;
@@ -74,7 +74,7 @@ fi
 
 # --- 4. 验证 .app 存在 ---
 echo "[3/4] 验证安装..."
-APP_PATH="$INSTALL_DIR/RVC视频伴侣.app"
+APP_PATH="$INSTALL_DIR/RVC-Video-Companion.app"
 if [ ! -d "$APP_PATH" ]; then
   # 尝试找任何 .app
   APP_PATH="$(find "$INSTALL_DIR" -name "*.app" -maxdepth 2 | head -1)"
@@ -114,7 +114,7 @@ if [ "$READY" -eq 1 ]; then
   echo "  4. 选择：$INSTALL_DIR/reader-video-companion"
   echo "  5. 打开 https://aim-read.top 点扩展图标"
   echo ""
-  echo "  以后每次使用：双击 ~/Applications/RVC视频伴侣/RVC视频伴侣.app"
+  echo "  以后每次使用：双击 ~/Applications/RVC-Video-Companion/RVC-Video-Companion.app"
   echo "============================================"
 else
   echo "============================================"

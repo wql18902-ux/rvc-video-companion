@@ -2,17 +2,17 @@
 # ============================================================
 # RVC 视频伴侣 - 一键生成分发包
 #
-# 产物：dist/RVC视频伴侣.zip
+# 产物：dist/RVC-Video-Companion.zip
 # 内容：.app（本地服务器）+ Chrome 扩展 + 安装说明
 # ============================================================
 set -euo pipefail
 
 PKG_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$PKG_DIR/.." && pwd)"
-APP="$PROJECT_ROOT/stream-server/packaging/dist/RVC视频伴侣.app"
+APP="$PROJECT_ROOT/stream-server/packaging/dist/RVC-Video-Companion.app"
 EXT_DIR="$PROJECT_ROOT/reader-video-companion"
 DIST="$PKG_DIR/dist"
-STAGING="$DIST/RVC视频伴侣"
+STAGING="$DIST/RVC-Video-Companion"
 
 # ADR-001: 版本号唯一源 = reader-video-companion/manifest.json（构建期读取注入）
 VER="$(python3 -c "import json;print(json.load(open('$EXT_DIR/manifest.json'))['version'])")"
@@ -62,14 +62,14 @@ cat > "$STAGING/安装说明.txt" <<INSTRUCTIONS
   想以后直接双击，打开「终端」app（Spotlight 搜 Terminal），
   粘贴这行命令后回车（路径根据你实际解压位置调整）：
 
-    xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
+    xattr -cr ~/Downloads/RVC-Video-Companion/RVC-Video-Companion.app
 
   做完后，以后每次打开 .app 都不会再被拦截。
 
 
 ━━ 第 1 步：启动服务器 ━━
 
-  1. 双击「RVC视频伴侣.app」
+  1. 双击「RVC-Video-Companion.app」
   2. 首次打开如果还提示拦截：右键 → 打开 → 确认
   3. 没有终端窗口弹出 = 正常运行（后台模式）
   4. 验证：打开浏览器访问 http://127.0.0.1:8765
@@ -102,7 +102,7 @@ cat > "$STAGING/安装说明.txt" <<INSTRUCTIONS
 
   输入监控（全局热键 S/A/D 用）：
     - 首次使用时系统会弹窗请求，点「允许」
-    - 或手动开启：系统设置 → 隐私与安全性 → 输入监控 → 勾选 RVC视频伴侣
+    - 或手动开启：系统设置 → 隐私与安全性 → 输入监控 → 勾选 RVC-Video-Companion
     - 不授权：全局热键失效，页面内热键和其余功能不受影响
 
   [提示] 每次更新 .app 后输入监控权限会失效，需重新勾选。
@@ -137,16 +137,16 @@ INSTRUCTIONS
 
 echo "==> [4/4] 打包 zip"
 cd "$DIST"
-ZIP_NAME="RVC视频伴侣.zip"
+ZIP_NAME="RVC-Video-Companion.zip"
 rm -f "$ZIP_NAME"
-ditto -c -k --sequesterRsrc --keepParent "RVC视频伴侣" "$ZIP_NAME"
+ditto -c -k --sequesterRsrc --keepParent "RVC-Video-Companion" "$ZIP_NAME"
 
 ZIP_SIZE=$(du -sh "$ZIP_NAME" | cut -f1)
 echo ""
 echo "  [完成] 分发包已生成：$DIST/$ZIP_NAME ($ZIP_SIZE)"
 echo ""
 echo "  内容："
-echo "    RVC视频伴侣.app              ← 本地服务器（含 ffmpeg）"
+echo "    RVC-Video-Companion.app       ← 本地服务器（含 ffmpeg）"
 echo "    reader-video-companion/      ← Chrome 扩展"
 echo "    安装说明.txt                  ← 使用指南（含第 0 步 xattr 清隔离）"
 echo ""

@@ -9,7 +9,7 @@ set -euo pipefail
 PKG_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$PKG_DIR/.." && pwd)"
 EXT_DIR="$PROJECT_ROOT/reader-video-companion"
-ZIP="$PKG_DIR/dist/RVC视频伴侣.zip"
+ZIP="$PKG_DIR/dist/RVC-Video-Companion.zip"
 
 # ADR-001: 版本号唯一源 = manifest.json
 VER="$(python3 -c "import json;print(json.load(open('$EXT_DIR/manifest.json'))['version'])")"

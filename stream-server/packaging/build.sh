@@ -121,7 +121,7 @@ echo "==> [4/4] PyInstaller onedir 打包 + 手动组装 .app"
   --distpath "$BUILD_DIR/dist" --workpath "$BUILD_DIR/pyinstaller" \
   "$PKG_DIR/rvc-server.spec"
 
-APP="$PKG_DIR/dist/RVC视频伴侣.app"
+APP="$PKG_DIR/dist/RVC-Video-Companion.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 cp "$BUILD_DIR/dist/rvc-server/rvc-server" "$APP/Contents/MacOS/rvc-server" 2>/dev/null || \
@@ -249,7 +249,7 @@ echo "=============================================="
 echo "  ✅ 打包完成：$APP"
 echo ""
 echo "  安装/使用（内部版三步走）："
-echo "  1. 双击 RVC视频伴侣.app 启动服务器（首次需右键 -> 打开）"
+echo "  1. 双击 RVC-Video-Companion.app 启动服务器（首次需右键 -> 打开）"
 echo "  2. 浏览器加载 reader-video-companion 扩展（.crx 或开发者模式加载）"
 echo "  3. 打开 aim-read.top 点扩展图标即可使用"
 echo "=============================================="

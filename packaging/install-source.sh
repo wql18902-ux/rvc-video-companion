@@ -12,7 +12,7 @@ set -euo pipefail
 
 GITHUB_REPO="wql18902-ux/rvc-video-companion"
 ZIP_URL="https://github.com/${GITHUB_REPO}/archive/refs/heads/main.zip"
-INSTALL_DIR="$HOME/Applications/RVC视频伴侣-源码版"
+INSTALL_DIR="$HOME/Applications/RVC-Video-Companion-Source"
 ZIP_FILE="/tmp/rvc-source.zip"
 
 echo ""

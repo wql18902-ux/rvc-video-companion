@@ -50,7 +50,7 @@ MAX_SSE_IDLE = 1800  # 30 分钟
 # 该处会破坏签名密封（codesign --verify --deep --strict 报 sealed resource 缺失），
 # 故 frozen 模式改写到用户日志目录；源码版保持 stream-server/logs/ 便于本地排查。
 if getattr(sys, 'frozen', False):
-    LOG_DIR = os.path.expanduser('~/Library/Logs/RVC视频伴侣')
+    LOG_DIR = os.path.expanduser('~/Library/Logs/RVC-Video-Companion')
 else:
     LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 
@@ -100,7 +100,7 @@ def read_app_version():
                 os.path.join(base, '..', 'Resources', 'reader-video-companion', 'manifest.json'),
                 # PyInstaller _MEIPASS 数据目录（若 --add-data 指定了 manifest）
                 os.path.join(sys._MEIPASS, 'reader-video-companion', 'manifest.json') if hasattr(sys, '_MEIPASS') else '',
-                # 发行目录布局：发行目录/RVC视频伴侣.app + 发行目录/reader-video-companion/
+                # 发行目录布局：发行目录/RVC-Video-Companion.app + 发行目录/reader-video-companion/
                 # base=Contents/MacOS，需上溯 3 级（MacOS -> Contents -> .app -> 发行目录）
                 os.path.join(base, '..', '..', '..', 'reader-video-companion', 'manifest.json'),
                 # 兼容历史 Resources 布局（未来版本可能改回）
