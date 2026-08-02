@@ -62,9 +62,11 @@ chrome.action.onClicked.addListener(async (tab) => {
     console.log('[RVC] 内容脚本注入成功');
 
     // 等待内容脚本初始化完成，然后重试发送消息
+    // 指数退避：50ms, 100ms, 200ms, 400ms, 800ms（总等待 1550ms，早期响应更快）
     let sent = false;
-    for (let i = 0; i < 5; i++) {
-      await new Promise(r => setTimeout(r, 150));
+    const delays = [50, 100, 200, 400, 800];
+    for (let i = 0; i < delays.length; i++) {
+      await new Promise(r => setTimeout(r, delays[i]));
       try {
         await chrome.tabs.sendMessage(tab.id, { action: 'rvc-toggle' });
         console.log('[RVC] 播放器切换成功');

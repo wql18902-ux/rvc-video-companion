@@ -1,6 +1,68 @@
 # PROGRESS - Reader 视频伴侣（浏览器播放器系统）
 
-> 更新：2026-08-01 哈希冻结收窄到判卷基准 + 分层测试覆盖负向路径（转码失败/端口占用/播放中断）+ 变更→受影响路由映射，L0/L1/L2 全绿。
+> 更新：2026-08-02 技术方案 P0-P2 + 定位方案最终轮落地：fixed 居中图层 + z-index=45 + 隐藏不播放 + 无浏览器不抢键。
+
+## 2026-08-02 播放器定位方案最终轮（fixed 居中图层）
+
+### 背景
+用户反馈播放器挤压文字（sticky+float 在 flex/grid 下 float 失效）。经多轮试错后确认用户要的是图层模式：播放器浮在页面上方，不挤压文字，居中显示，滚动时始终可见，单词弹窗浮在播放器上方。
+
+### 改动
+- **player.css**：`position: fixed; left:50%; margin-left:-210px; top:100px; z-index:45`（不用 transform 居中，避免与拖拽 transform 冲突）
+- **content.js createPlayer**：挂到 `document.body`（不插入 article 容器，脱离页面布局）
+- **content.js rvc-toggle**：简化为 `document.body.contains(player)` 检查
+- **content.js finishLoad**：播放器 `display:none` 时不调 `video.play()`（防"出声不见画面"）
+- **server.py serve_control_key**：无 SSE 客户端时忽略热键（不抢键）
+- **content.js restoreLayout**：transform 偏移边界检查 `Math.abs(tx) <= 500`（防旧偏移推偏位置）
+- **player.css z-index=45**：高于内容 z-10，低于单词弹窗 z-50（弹窗浮在播放器上方）
+
+### 验证
+- L0 静态 14/14 PASS / L1 单测 29/29 PASS / L2 E2E 5/5 PASS / L3 验收 12/12 PASS
+
+## 2026-08-02 技术方案全量落地（P0-P2）
+
+### 背景
+对全代码库进行系统审查后，发现 4 个 P0 严重问题（热键子进程泄漏、POST 无体限、SSE 无超时、B9 竞态未根治）+ 4 个 P1 重要问题（转码不支持 Seek、热键子进程不自动重启、打包版 version unknown、background 退避策略）+ 3 个 P2 改善（api 命名空间、CSS 分节、文档对齐）。全部落地。
+
+### P0 安全与稳定性修复
+1. **热键子进程泄漏修复**（server.py signal_handler）：新增 `kill_hotkey_proc()` 函数，signal_handler 在 kill ffmpeg 后同时 terminate hotkey_proc，防止 pynput 孤儿进程残留。实测前每次重启都泄漏一个子进程（CLAUDE.md 已记录 3 个孤儿）。
+2. **POST 请求体大小限制**（server.py）：新增 `MAX_POST_BODY=1MB` 常量 + `read_body()` 方法，`serve_control_key` 和 `serve_set_keybindings` 统一使用。超限返回 413。
+3. **SSE 空闲超时**（server.py serve_control_sse）：新增 `MAX_SSE_IDLE=1800s`（30 分钟），连接超过此时间无事件则主动关闭，防僵尸 TCP 连接占满 10 个 SSE 槽位。
+4. **B9 竞态根治**（content.js）：`loadFileList` 新增 `dirOverride` 参数，`showFolderOverlay` 显式传入 storage 恢复后的目录值，消除 `dirInput.value` 读取时序竞态。
+5. **/tmp 日志清理**（server.py serve_pick_folder）：删除 `/tmp/rvc-pick-folder.log` 调试写入（信息泄露 + 无清理）。
+
+### P1 架构与体验优化
+1. **转码 Seek 支持**（content.js loadFile + bindProgressEvents）：`loadFile` 新增 `seekStart` 参数，转码模式拖动进度条时重新发起 `/api/stream?start=<秒>` 请求。`state.currentDir` 存储当前目录供 seek 使用。
+2. **热键看门狗**（server.py hotkey_watchdog）：新增 daemon 线程，每 120s 检查 `hotkey_proc.poll()`，子进程异常退出时自动用当前按键绑定重启。覆盖 macOS 休眠唤醒后 pynput 静默死亡场景。
+3. **打包版 version 修复**（server.py read_app_version）：新增 `sys._MEIPASS` 候选路径，覆盖 manifest.json 作为 PyInstaller 数据文件打包的场景。
+4. **background.js 指数退避**：重试间隔从固定 150ms 改为指数退避 [50, 100, 200, 400, 800]ms，首帧响应更快。
+
+### P2 可维护性改善
+1. **api 命名空间**（content.js）：新增 `api` 对象封装所有对本地服务器的 fetch 调用（files/tree/pickFolder/fileUrl/streamUrl/streamError/setKeybindings/health），调用点全部迁移。`checkServer` 保留 raw fetch（需检查 res.ok）。
+2. **state.currentDir 新增**：存储当前播放文件所在目录，seek 重新加载时不依赖 dirInput 当前值。
+3. **player.css 分节注释**：标题栏、视频区域、控制条、进度条等区域加 `==========` 分隔注释。
+
+### 变更文件
+- server.py：signal_handler + kill_hotkey_proc + read_body + MAX_POST_BODY + MAX_SSE_IDLE + serve_control_sse 超时 + serve_pick_folder 日志删除 + hotkey_watchdog + read_app_version _MEIPASS 路径
+- content.js：api 命名空间 + loadFileList dirOverride + showFolderOverlay B9 修复 + loadFile seekStart + bindProgressEvents seek + state.currentDir + pushKeybindingsToServer 迁移
+- background.js：指数退避
+- player.css：分节注释
+- PROGRESS.md / BLOCKED.md：本次变更记录
+
+### 验证
+- `bash scripts/check.sh --static`：14/14 PASS
+- L1 单测：29/29 PASS
+- node -c content.js：通过
+- py_compile server.py：通过
+- emoji 扫描：通过
+
+### 行数
+- content.js 1478 → 1500（+22：api 命名空间 + seek 逻辑 + B9 修复）
+- server.py 1025 → ~1075（+50：hotkey 看门狗 + read_body + kill_hotkey_proc + SSE 超时）
+- player.css 819 → ~830（节级注释）
+- background.js 83 → 85（指数退避）
+
+
 
 ## 2026-08-02 .app 签名链路真正跑通（build.sh 三 bug 修复 + spctl 可绕过）
 

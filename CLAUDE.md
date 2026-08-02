@@ -12,7 +12,7 @@ bash stream-server/start.sh
 # 加载扩展：chrome://extensions → 开发者模式 → 加载已解压 → reader-video-companion/
 # 使用：访问 aim-read.top，点扩展图标唤出浮窗播放器
 
-# 跑验收（必须先清 profile，否则 G2 残留致 C 超时；且需同一命令内拉起 8765 服务器 + 清 HTTP_PROXY，详见「验收环境」）
+# 跑验收（必须先清 profile，否则 G2 残留致 C 超时；且需同一命令内拉起 8765 服务器 + 清 HTTP_PROXY，详见 AGENTS.md「验收通路」）
 rm -rf /tmp/rvc-pw-profile-accept
 env -u PYTHONHOME -u PYTHONPATH /opt/homebrew/bin/python3 tests/acceptance.py
 
@@ -58,13 +58,19 @@ Chrome MV3 扩展（Vanilla JS）/ Python 3 标准库 http.server（BaseHTTPRequ
 ## 当前状态
 
 v3.2.2（manifest.json 唯一版本源；main 最新 = fc0e50b，已推送 origin/main）。
+- **2026-08-02 技术方案 P0-P2 全量落地**：
+  - P0 安全稳定性：signal_handler 清理 hotkey_proc（防孤儿进程）；POST 请求体 1MB 限制（read_body）；SSE 空闲 30min 超时（MAX_SSE_IDLE）；B9 竞态根治（loadFileList dirOverride）；删除 /tmp/rvc-pick-folder.log
+  - P1 架构体验：转码 Seek 支持（进度条拖动重新请求 /api/stream?start=）；热键看门狗（120s 检测 + 自动重启）；打包版 version 修复（_MEIPASS 路径）；background.js 指数退避
+  - P2 可维护性：content.js api 命名空间（封装所有 fetch 调用）；state.currentDir 新增；player.css 分节注释
 - **2026-08-02 swift-thunder-newton 方案 P0-P2 已落地（commit 0152371）**：
   - P0 文件选择 UX：删 `openFolderViaFinder()`，btnFolder/btnLoadMain 只 `showFolderOverlay()`（不自动弹 Finder）；浮层自动列上次目录 + loadFileList 带 seq 令牌守卫；dirPickBtn=「访达选择目录（macOS 高级选项）」；serve_pick_folder 用 `open -a Finder --hide` + Standard Additions choose folder
   - P1 转码竞态：`/api/stream-error` 服务端长轮询（未就绪最多等 5s）；serve_stream finally 只 kill 本请求进程；客户端转码兜底超时 15s→10s
   - P2 清理：删 LAYOUT_SCHEMA 迁移（restoreLayout 守卫兜底）；content.js 顶部模块注释
   - P3 状态机简化**未做**（Archi ADR：单独立项，验收稳定后再评估）
 - **2026-08-02 启动脚本（6fbb3f9 + fc0e50b）**：.command 双击场景补 brew PATH；start.sh 增加 pynput 自检（缺失仅 WARN 不阻塞）
-- **核心配置**：player.css `position: sticky + float:right`（fixed 已回滚）；server.py pick-folder 用 `open -a Finder --hide` 两步弹窗（分步签名的打包版无 TCC 自动化权限，不能用 tell Finder/System Events）；server.py 编码器 `libx264 -preset fast -crf 23`；content.js keys-panel 恢复（state.keybindings + chrome.storage.local）
+- **核心配置**：player.css `position: fixed; left:50%; margin-left:-210px; top:100px; z-index:45`（图层模式，不挤压文字，低于弹窗 z-50）；server.py pick-folder 用 `open -a Finder --hide` 两步弹窗；server.py 编码器 `libx264 -preset fast -crf 23`；content.js keys-panel 恢复（state.keybindings + chrome.storage.local）
+- **播放器定位演进**：sticky+float（挤压文字，flex/grid 下 float 失效）→ fixed 悬浮（被拒要夹心）→ 回退 sticky+float + wrapper（wrapper 破坏 sticky）→ 回退 sticky+float + findArticleContainer 跳过 flex/grid（SPA 时序导致插错容器）→ 最终确认 fixed 居中图层（用户要图层不挤压，z-index=45 低于弹窗 z-50）
+- **新增修复（定位方案最终轮）**：播放器隐藏时不自动播放（防出声不见画面）；服务端无 SSE 客户端时忽略热键（不抢键）；restoreLayout transform 边界检查（防旧偏移推偏位置）；rvc-toggle 用 container.contains(player) 检查容器（防 SPA 挪位）
 - **历史根因（保留备查）**：pynput 全局热键与 HTTP 服务同进程，无「输入监控」权限时被 macOS SIGKILL。已拆 `--hotkey-child` 子进程隔离。每次重打包 .app 后输入监控权限失效（adhoc 签名按二进制哈希记账），需重新授权
 - **验收环境两坑（2026-08-02 实测）**：
   1. WorkBuddy/IDE 注入 `HTTP_PROXY=127.0.0.1:52577` 会让 Playwright Chromium 内 fetch 8765 全挂（curl 直连却正常）——跑 L3 必须 `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy`

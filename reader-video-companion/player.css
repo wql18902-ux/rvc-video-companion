@@ -1,13 +1,14 @@
-/* ========== 嵌入式播放器容器（sticky + float:right，跟随文章滚动，不挤压正文） ========== */
+/* ========== 播放器图层（fixed 居中悬浮，不挤压正文，跟随滚动始终可见） ========== */
 .rvc-player {
-  position: sticky;
-  top: 10px;
-  float: right;
+  position: fixed;
+  top: 100px;
+  left: 50%;
+  margin-left: -210px;
   width: 420px;
   min-width: 240px;
   min-height: 160px;
-  margin: 0 0 16px 20px;
-  z-index: 1;
+  margin-top: 0;
+  z-index: 45;
   background: rgba(24, 24, 26, 0.82);
   -webkit-backdrop-filter: blur(16px) saturate(160%);
   backdrop-filter: blur(16px) saturate(160%);
@@ -124,7 +125,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 标题栏 */
+/* ========== 标题栏 + 按钮组 ========== */
 .rvc-header {
   display: flex;
   align-items: center;
@@ -179,7 +180,7 @@
   color: #4db0ff;
 }
 
-/* 视频区域 */
+/* ========== 视频区域 ========== */
 .rvc-body {
   flex: 1;
   display: flex;
@@ -222,7 +223,7 @@
   transform: translateY(-1px);
 }
 
-/* 控制条 */
+/* ========== 控制条（播放/前后退/进度条/倍速） ========== */
 .rvc-controls {
   display: flex;
   align-items: center;
@@ -340,7 +341,7 @@
   position: relative;
 }
 
-/* 进度条圆形把手（hover 显示） */
+/* ========== 进度条 ========== */
 .rvc-progress-bar::after {
   content: '';
   position: absolute;

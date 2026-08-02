@@ -1,6 +1,6 @@
 # BLOCKED - 待裁决/未决清单
 
-> 更新：2026-08-02 —— B14 已解决（存档与实测一致，无篡改）；新增 B16 验收环境坑。B1 仍有效。
+> 更新：2026-08-02 技术方案 P0-P2 落地 —— B9 已根治（loadFileList dirOverride）；新增热键看门狗/SSE 超时/POST 限制/转码 Seek。B1 仍有效。
 
 ## B16. 验收环境两坑（2026-08-02 实测，WorkBuddy/IDE 环境特有）
 
@@ -67,12 +67,11 @@
 - 改 UI 样式（border-radius/shadow/stroke 等）：打包版无问题，不做。
 - 以上均为「最诱人的顺手活」，任务文档要求写 BLOCKED.md 不做。
 
-## B9. 验收 F 步偶发 flaky（非本次引入，仍有效）
+## B9. 验收 F 步偶发 flaky（已解决，2026-08-02 技术方案 P0.4 根治）
 
-- 现象：F 步（固定目录 pin+记忆+切换）偶发 FAIL，切换后目录显示 `~/Downloads` 而非 fixtures。根因是 `chrome.storage.local.get` 异步恢复 `rvc-last-dir` 与 `loadFileList()` 读取 dirInput 存在毫秒级竞态。
-- 复现率：约 1/3（连续 3 次跑 1 次 FAIL）。
-- 绕过：重跑即可通过。非本次三功能引入（回滚基线也有相同概率）。
-- 不修：修需要改 content.js 初始化时序或验收脚本，前者有风险后者 sha256 冻结。
+- 原现象：F 步（固定目录 pin+记忆+切换）偶发 FAIL，切换后目录显示 `~/Downloads` 而非 fixtures。根因是 `chrome.storage.local.get` 异步恢复 `rvc-last-dir` 与 `loadFileList()` 读取 dirInput 存在毫秒级竞态。
+- 修复：`loadFileList` 新增 `dirOverride` 参数，`showFolderOverlay` 在 `await storageReady` 后显式传入 `elements.dirInput.value`（已恢复），消除读取时序竞态。
+- 判定：已根治。验收 F 步不再依赖 `loadFileList` 内部读取 `dirInput` 的时机。
 
 ## B10. h264_videotoolbox 转码回归（已解决）
 

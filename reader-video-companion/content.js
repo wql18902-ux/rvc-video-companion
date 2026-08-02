@@ -13,6 +13,24 @@
 
   const SERVER = 'http://127.0.0.1:8765';
 
+  // ========== API 命名空间：封装所有对本地服务器的 fetch 调用 ==========
+  const api = {
+    health: () => fetch(SERVER + '/api/health').then(r => r.json()),
+    files: (dir) => fetch(SERVER + '/api/files?dir=' + encodeURIComponent(dir)).then(r => r.json()),
+    tree: (dir) => fetch(SERVER + '/api/tree?dir=' + encodeURIComponent(dir)).then(r => r.json()),
+    pickFolder: () => fetch(SERVER + '/api/pick-folder').then(r => r.json()),
+    fileUrl: (file, dir) => SERVER + '/api/file?file=' + encodeURIComponent(file) + '&dir=' + encodeURIComponent(dir),
+    streamUrl: (file, dir, reqId, start) => {
+      let url = SERVER + '/api/stream?file=' + encodeURIComponent(file) + '&dir=' + encodeURIComponent(dir) + '&req=' + reqId;
+      if (start && start > 0) url += '&start=' + start;
+      return url;
+    },
+    streamError: (reqId) => fetch(SERVER + '/api/stream-error?req=' + encodeURIComponent(reqId)).then(r => r.json()),
+    setKeybindings: (kb) => fetch(SERVER + '/api/set-keybindings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kb)
+    }).catch(() => {}),
+  };
+
   // Lucide 风格 inline SVG（stroke 1.8、14px、currentColor），替代所有 emoji/字形符号
   const ICON = {
     video: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>',
@@ -52,6 +70,7 @@
     transcodeErrorShown: false,  // 错误已展示（mpegts ERROR / video error / 超时 三路去重）
     serverOnline: false,
     currentFile: null,
+    currentDir: null,      // 当前播放文件所在目录（seek 重新加载时用，避免 dirInput 已被修改）
     pinnedDirs: [],         // 固定目录列表（LRU，最前为最近使用，上限 8）
     videoRatio: null,       // 视频宽高比 w/h（loadedmetadata 时更新，null 表示无视频）
     keybindings: { toggle_play: 's', back: 'a', forward: 'd' }  // 自定义按键（chrome.storage.local 持久化）
@@ -62,6 +81,8 @@
   // v3.0.x 的 rvc-layout-schema 一次性迁移已于 v3.2.2 完成，此处移除。
 
   // ========== 查找文章内容容器 ==========
+  // 跳过 flex/grid 容器：float:right 在 flex/grid 下被忽略，会导致播放器挤开文字。
+  // 优先找 block-level 容器（article / p / div block），确保 float 生效。
   function findArticleContainer() {
     const selectors = [
       'article',
@@ -71,7 +92,21 @@
     ];
     for (const sel of selectors) {
       const el = document.querySelector(sel);
-      if (el && el.offsetHeight > 300) return el;
+      if (!el || el.offsetHeight <= 300) continue;
+      const display = getComputedStyle(el).display;
+      // flex/grid 容器：float 不生效，尝试在子元素中找 block 容器
+      if (display === 'flex' || display === 'grid') {
+        // 找第一个足够高的 block-level 子元素
+        for (const child of el.children) {
+          const childDisplay = getComputedStyle(child).display;
+          if ((childDisplay === 'block' || childDisplay === 'list-item' || childDisplay === 'flow-root')
+              && child.offsetHeight > 300) {
+            return child;
+          }
+        }
+        // 没找到合适的 block 子元素，退而求其次用原容器
+      }
+      return el;
     }
     return document.body;
   }
@@ -213,12 +248,8 @@
     `;
     document.body.appendChild(treeOverlay);
 
-    // sticky 嵌入文章容器顶部：跟随文章滚动，float:right 让正文环绕
-    const container = findArticleContainer();
-    container.insertBefore(player, container.firstChild);
-
-    // 修复祖先 overflow，确保 sticky 生效
-    fixAncestorOverflow(player);
+    // 图层模式：挂到 body，fixed 定位浮在页面上方，不挤压正文
+    document.body.appendChild(player);
 
     // 默认隐藏，点击扩展图标才显示
     player.style.display = 'none';
@@ -248,11 +279,9 @@
   // ========== 监听扩展图标点击（toggle 显示/隐藏）==========
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === 'rvc-toggle') {
-      // SPA 页面重建 DOM 时 player 可能被移除，重新挂载到文章容器顶部
+      // 图层模式：player 挂在 body 上，fixed 定位
       if (!document.body.contains(player)) {
-        const container = findArticleContainer();
-        container.insertBefore(player, container.firstChild);
-        fixAncestorOverflow(player);
+        document.body.appendChild(player);
       }
       if (player.style.display === 'none') {
         player.style.display = 'flex';
@@ -370,8 +399,10 @@
     renderPinnedChips();
     // 自动列出上次目录文件（若已恢复），减少一次手动刷新；
     // loadFileList 内部有 seq 令牌，用户随后 fill/刷新会顶替自动请求，不会互相覆盖
-    if (elements.dirInput.value.trim()) {
-      loadFileList();
+    // B9 修复：显式传入 dirInput.value（storage 已恢复），消除读取时序竞态
+    const restoredDir = elements.dirInput.value.trim();
+    if (restoredDir) {
+      loadFileList(restoredDir);
     }
   }
 
@@ -405,8 +436,8 @@
     elements.dirPickBtn.disabled = true;
     elements.dirPickBtn.textContent = '选择中...';
     try {
-      const res = await fetch(SERVER + '/api/pick-folder');
-      const data = await res.json();
+      const res = await api.pickFolder();
+      const data = res;
       if (data.ok && data.dir) {
         elements.dirInput.value = data.dir;
         return true;
@@ -466,9 +497,9 @@
   // 用 seq 令牌丢弃陈旧响应，避免旧目录结果覆盖新输入（acceptance C 步依赖）
   let fileListSeq = 0;
 
-  async function loadFileList() {
+  async function loadFileList(dirOverride) {
     const seq = ++fileListSeq;
-    const dir = elements.dirInput.value.trim() || '~/Downloads';
+    const dir = (typeof dirOverride === 'string' && dirOverride) || elements.dirInput.value.trim() || '~/Downloads';
     elements.folderStatus.textContent = '加载中...';
     elements.folderList.innerHTML = '';
 
@@ -480,8 +511,7 @@
     }
 
     try {
-      const res = await fetch(SERVER + '/api/files?dir=' + encodeURIComponent(dir));
-      const data = await res.json();
+      const data = await api.files(dir);
       if (seq !== fileListSeq) return;   // 已被更新的刷新请求顶替，丢弃陈旧结果
       if (data.error) {
         elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + escapeHtml(data.error) + '</span>';
@@ -614,8 +644,7 @@
     }
 
     try {
-      const res = await fetch(SERVER + '/api/tree?dir=' + encodeURIComponent(dir));
-      const data = await res.json();
+      const data = await api.tree(dir);
       if (data.error) {
         elements.treeStatus.innerHTML = '<span style="color:#ff6b6b;">' + escapeHtml(data.error) + '</span>';
         return;
@@ -817,8 +846,10 @@
         if (data.height && data.height >= 160) player.style.height = data.height + 'px';
         if (data.left) player.style.left = data.left + 'px';
         if (data.top) player.style.top = data.top + 'px';
-        if (typeof data.tx === 'number') dragOffset.x = data.tx;
-        if (typeof data.ty === 'number') dragOffset.y = data.ty;
+        // transform 偏移边界保护：旧代码保存的偏移可能把播放器推到错误位置，
+        // 超过 500px 视为异常，重置为 0（用户可重新拖拽到想要的位置）
+        if (typeof data.tx === 'number' && Math.abs(data.tx) <= 500) dragOffset.x = data.tx;
+        if (typeof data.ty === 'number' && Math.abs(data.ty) <= 500) dragOffset.y = data.ty;
         applyDragOffset();
       }).catch(() => {});
     } catch (e) {}
@@ -843,8 +874,9 @@
   }
 
   // ========== 加载视频文件 ==========
-  async function loadFile(filename, dir, silent) {
+  async function loadFile(filename, dir, silent, seekStart) {
     state.currentFile = filename;
+    state.currentDir = dir;
 
     const online = await checkServer();
     if (!online) {
@@ -879,7 +911,7 @@
 
     if (['mp4', 'm4v', 'webm'].includes(ext)) {
       state.currentReqId = null;   // 原生直发不走转码通道
-      elements.video.src = SERVER + '/api/file?file=' + encodeURIComponent(filename) + '&dir=' + encodeURIComponent(dir);
+      elements.video.src = api.fileUrl(filename, dir);
       finishLoad(filename, dir);
       return;
     }
@@ -889,7 +921,7 @@
       // 请求关联 ID（时间戳+随机）：服务器用它命名转码日志，错误回调凭它查询结构化错误
       const reqId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
       state.currentReqId = reqId;
-      const streamUrl = SERVER + '/api/stream?file=' + encodeURIComponent(filename) + '&dir=' + encodeURIComponent(dir) + '&req=' + reqId;
+      const streamUrl = api.streamUrl(filename, dir, reqId, seekStart);
       state.player = mpegts.createPlayer({
         type: 'mpegts',
         url: streamUrl,
@@ -949,9 +981,12 @@
     // 尝试自动播放；被浏览器自动播放策略拦截时降级为"点击播放"提示（非常驻，5s 后自动消失）。
     // 验收环境（--mute-audio + --autoplay-policy=no-user-gesture-required）允许自动播放，
     // 故提示不出现，避免遮住视频中心导致 G2 无框拖拽落空。
-    elements.video.play().catch(() => {
-      showPlayHint();
-    });
+    // 播放器隐藏时（自动续播场景）不播放，避免"没看到画面就出声"
+    if (player.style.display !== 'none') {
+      elements.video.play().catch(() => {
+        showPlayHint();
+      });
+    }
 
     try {
       chrome.storage.local.set({ 'rvc-last-file': filename, 'rvc-last-dir': dir }).catch(() => {});
@@ -983,8 +1018,7 @@
     // 覆盖 ffmpeg 慢速解析坏文件导致的写入延迟）；此处单次请求即可拿到结果，
     // 仅在网络异常时重试几次兜底（此前 2s 重试窗口在慢速转码下会误报）
     const tryFetch = (attempt) => {
-      fetch(SERVER + '/api/stream-error?req=' + encodeURIComponent(reqId))
-        .then(r => r.json())
+      api.streamError(reqId)
         .then(d => {
           if (d && d.ok && d.code) {
             showTranscodeError(reqId, d.code, d.message, d.log);
@@ -1162,7 +1196,13 @@
       const rect = progressEl.getBoundingClientRect();
       if (rect.width <= 0) return;
       const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      elements.video.currentTime = pct * (elements.video.duration || 0);
+      const targetTime = pct * (elements.video.duration || 0);
+      if (state.player && state.currentFile) {
+        // 转码模式：MPEG-TS 不支持原生 seek，重新发起流请求带 start 参数
+        loadFile(state.currentFile, state.currentDir, true, targetTime);
+      } else {
+        elements.video.currentTime = targetTime;
+      }
     };
     progressEl.addEventListener('click', seekTo);
     // 拖拽跳转；拖动中加 .rvc-fb-active 保持悬浮条可见（鼠标移出 bar 不消失）
@@ -1218,6 +1258,7 @@
     player.classList.add('rvc-empty');
     state.isPlaying = false;
     state.currentFile = null;
+    state.currentDir = null;
     updatePlayButton();
     // 隐藏整个播放器
     player.style.display = 'none';
@@ -1261,11 +1302,7 @@
   // 把当前按键推送到服务端：全局热键子进程据此重启，使自定义键在页面失焦时也生效
   function pushKeybindingsToServer() {
     try {
-      fetch(SERVER + '/api/set-keybindings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state.keybindings)
-      }).catch(() => {});
+      api.setKeybindings(state.keybindings);
     } catch (e) {}
   }
 

@@ -39,6 +39,10 @@ ALLOWED_HOSTS = {'127.0.0.1:8765', 'localhost:8765'}
 SERVE_FILE_EXTS = {'.mp4', '.m4v', '.webm'}
 # SSE 最大并发连接数（防线程耗尽，每连接占一线程）
 MAX_SSE_CLIENTS = 10
+# POST 请求体大小上限（字节），防止恶意超大 Content-Length 耗尽内存
+MAX_POST_BODY = 1024 * 1024  # 1MB
+# SSE 连接空闲超时（秒）：超过此时间无任何事件（含心跳）则主动关闭，防僵尸连接占线程
+MAX_SSE_IDLE = 1800  # 30 分钟
 
 # 转码日志目录：每次 ffmpeg 请求的 stderr 落盘为 transcode-<req_id>.log
 # （req_id 由播放端生成：时间戳+随机，天然按时间与请求关联，便于排查）
@@ -94,6 +98,8 @@ def read_app_version():
             candidates = [
                 # 打包内置布局：manifest.json 由 build.sh 拷入 Contents/Resources/reader-video-companion/
                 os.path.join(base, '..', 'Resources', 'reader-video-companion', 'manifest.json'),
+                # PyInstaller _MEIPASS 数据目录（若 --add-data 指定了 manifest）
+                os.path.join(sys._MEIPASS, 'reader-video-companion', 'manifest.json') if hasattr(sys, '_MEIPASS') else '',
                 # 发行目录布局：发行目录/RVC视频伴侣.app + 发行目录/reader-video-companion/
                 # base=Contents/MacOS，需上溯 3 级（MacOS -> Contents -> .app -> 发行目录）
                 os.path.join(base, '..', '..', '..', 'reader-video-companion', 'manifest.json'),
@@ -221,6 +227,19 @@ def restart_hotkey_listener():
             pass
         hotkey_proc = None
     start_hotkey_listener(CURRENT_KEYBINDINGS)
+
+
+def hotkey_watchdog():
+    """守护线程：每 120s 检查热键子进程存活状态。
+    若子进程已退出（poll() 非 None），自动用当前按键绑定重启。
+    覆盖 macOS 休眠唤醒后 pynput 进程静默死亡等场景。"""
+    while True:
+        time.sleep(120)
+        if hotkey_proc is None:
+            continue
+        if hotkey_proc.poll() is not None:
+            print("[WARN] 热键子进程已退出，尝试重启")
+            start_hotkey_listener(CURRENT_KEYBINDINGS)
 
 
 def run_hotkey_child():
@@ -387,6 +406,14 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             return None, None
         return base, full
 
+    def read_body(self):
+        """读取 POST 请求体，强制 MAX_POST_BODY 上限。
+        超限返回 None（调用方应回复 413），正常返回 bytes。"""
+        length = int(self.headers.get('Content-Length', 0))
+        if length > MAX_POST_BODY:
+            return None
+        return self.rfile.read(length) if length > 0 else b''
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -456,16 +483,22 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
 
     def serve_control_key(self):
         """内部端点：接收热键子进程 POST 的事件，转手广播给 SSE 客户端"""
-        length = int(self.headers.get('Content-Length', 0))
+        body = self.read_body()
+        if body is None:
+            self.send_error(413, "Payload Too Large")
+            return
         try:
-            body = self.rfile.read(length) if length > 0 else b''
             data = json.loads(body) if body else {}
         except Exception:
             self.send_json({'ok': False, 'error': 'bad json'})
             return
         action = data.get('action')
         if action in ('toggle_play', 'back', 'forward'):
-            broadcast_control_event(action)
+            # 无 SSE 客户端时忽略热键：用户没打开浏览器/扩展时不抢键
+            with control_clients_lock:
+                has_clients = len(control_clients) > 0
+            if has_clients:
+                broadcast_control_event(action)
             self.send_json({'ok': True})
         else:
             self.send_json({'ok': False, 'error': 'unknown action'})
@@ -474,9 +507,11 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         """接收 content.js 推送的用户自定义热键，校验后持久化并重启子进程。
         严格校验：仅接受单字符 a-z0-9，杜绝 IME 候选词/修饰键名/多字符脏值；
         某 action 非法时保留其默认键，不继承客户端脏值。"""
-        length = int(self.headers.get('Content-Length', 0))
+        body = self.read_body()
+        if body is None:
+            self.send_error(413, "Payload Too Large")
+            return
         try:
-            body = self.rfile.read(length) if length > 0 else b''
             data = json.loads(body) if body else {}
         except Exception:
             self.send_json({'ok': False, 'error': 'bad json'})
@@ -604,9 +639,6 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         # 该事件报 -1708（errAEEventNotHandled）；源码版从终端跑继承终端授权
         # 所以正常。为什么不用 tell System Events：会触发 -1743
         # （errAEEventNotPermitted）权限弹窗。
-        with open('/tmp/rvc-pick-folder.log', 'a') as _log:
-            _log.write(f'[{datetime.datetime.now()}] pick-folder 被调用\n')
-            _log.flush()
         clean_env = {k: v for k, v in os.environ.items() if k not in ('PYTHONHOME', 'PYTHONPATH')}
         # 第 1 步：LaunchServices 激活 Finder 到前台（open 命令不需要 Apple Events 授权；
         # 不检查 returncode——Finder 激活失败也不阻塞弹窗，choose folder 仍会弹，
@@ -615,10 +647,9 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         # 可见性影响），避免 Finder 抢前台遮挡真正的选择对话框（修复 B1 断裂点）
         try:
             subprocess.run(['open', '-a', 'Finder', '--hide'], timeout=10)
-        except Exception as _e:
-            # Finder 激活失败不影响 choose folder 弹窗，仅记日志后忽略
-            with open('/tmp/rvc-pick-folder.log', 'a') as _log:
-                _log.write(f'[{datetime.datetime.now()}] open -a Finder --hide 失败: {_e}\n')
+        except Exception:
+            # Finder 激活失败不影响 choose folder 弹窗，忽略
+            pass
         # 第 2 步：纯 Standard Additions 弹窗（无 tell 其他 app，不需要自动化权限）
         try:
             result = subprocess.run(
@@ -746,7 +777,9 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
     def serve_control_sse(self):
         """SSE 端点：全局热键事件流，播放器页面连接后实时接收控制指令。
         心跳保活：每 15s 写一次注释行（EventSource 忽略），不再 30s 主动断开；
-        连接数上限 MAX_SSE_CLIENTS，超限拒绝新连接防线程耗尽。"""
+        连接数上限 MAX_SSE_CLIENTS，超限拒绝新连接防线程耗尽。
+        空闲超时：MAX_SSE_IDLE 秒内无任何事件（含心跳写入成功）则主动关闭，
+        防止僵尸 TCP 连接（客户端断开但未发 FIN）占用线程。"""
         with control_clients_lock:
             if len(control_clients) >= MAX_SSE_CLIENTS:
                 self.send_response(503)
@@ -762,10 +795,14 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Connection', 'keep-alive')
         self.end_headers()
 
+        last_event_time = time.time()
         try:
             while True:
+                if time.time() - last_event_time > MAX_SSE_IDLE:
+                    break
                 try:
                     action = client_q.get(timeout=15)
+                    last_event_time = time.time()
                     data = json.dumps({'action': action, 't': time.time()})
                     self.wfile.write(f'data: {data}\n\n'.encode())
                     self.wfile.flush()
@@ -773,6 +810,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
                     # 心跳保活：写注释行，浏览器 EventSource 忽略，连接保持活跃
                     self.wfile.write(b': ping\n\n')
                     self.wfile.flush()
+                    # 心跳写入成功也算连接活跃（重置超时计时器）
+                    last_event_time = time.time()
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
@@ -965,8 +1004,24 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
 
+def kill_hotkey_proc():
+    """终止热键子进程，防止服务器退出后 pynput 孤儿进程残留"""
+    global hotkey_proc
+    if hotkey_proc is not None:
+        try:
+            hotkey_proc.terminate()
+            hotkey_proc.wait(timeout=3)
+        except Exception:
+            try:
+                hotkey_proc.kill()
+            except Exception:
+                pass
+        hotkey_proc = None
+
+
 def signal_handler(sig, frame):
     kill_current_proc()
+    kill_hotkey_proc()
     print("\n已停止")
     sys.exit(0)
 
@@ -1014,6 +1069,11 @@ if __name__ == '__main__':
     print()
 
     start_hotkey_listener(CURRENT_KEYBINDINGS)
+
+    # 热键看门狗：每 120s 检查子进程存活，异常退出则自动重启
+    wd = threading.Thread(target=hotkey_watchdog, daemon=True)
+    wd.start()
+
     print()
     print("在浏览器打开上面的地址即可开始使用")
     print("按 Ctrl+C 停止服务")
