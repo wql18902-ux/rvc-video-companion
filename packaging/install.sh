@@ -65,7 +65,7 @@ ditto -xk "$ZIP_FILE" "$INSTALL_DIR"
 rm -f "$ZIP_FILE"
 
 # 处理 zip 内可能有的嵌套目录（zip 解压后可能多一层文件夹）
-NESTED="$(find "$INSTALL_DIR" -maxdepth 1 -type d -name "RVC-Video-Companion*" | head -1)"
+NESTED="$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -type d -name "RVC-Video-Companion*" | head -1)"
 if [ -n "$NESTED" ] && [ "$NESTED" != "$INSTALL_DIR" ]; then
   # 把嵌套内容提上来（find -mindepth 1 避免匹配 . 和 ..）
   find "$NESTED" -mindepth 1 -maxdepth 1 -exec mv {} "$INSTALL_DIR"/ \;
