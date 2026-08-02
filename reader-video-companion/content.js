@@ -393,6 +393,8 @@
       document.body.appendChild(folderOverlay);
     }
     folderOverlay.style.display = 'flex';
+    // 立即同步按钮状态：serverOnline 未确认前"浏览"灰掉，防止用户点了没反应
+    updatePickBtnState();
     // 等待 storage 恢复固定目录/上次目录后再渲染 chips，避免空列表竞态 (B9)
     // overlay 已先显示（即时反馈），chips 在 storageReady 后补齐
     await storageReady;
@@ -432,7 +434,16 @@
 
   // 调服务端弹原生访达；返回 true=已选目录, 'cancelled'=用户取消, false=失败
   async function doPickFolder() {
-    if (!state.serverOnline) return false;
+    // 服务器状态未确认时先尝试连接（而非静默 return），给用户即时反馈
+    if (!state.serverOnline) {
+      elements.folderStatus.textContent = '正在连接服务器...';
+      const online = await checkServer();
+      updatePickBtnState();
+      if (!online) {
+        elements.folderStatus.innerHTML = '<span style="color:#ff6b6b;">' + ICON.alert + ' 服务器未启动，无法使用访达选择</span>';
+        return false;
+      }
+    }
     elements.dirPickBtn.disabled = true;
     elements.dirPickBtn.textContent = '选择中...';
     try {
