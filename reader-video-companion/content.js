@@ -980,6 +980,7 @@
       state.player.destroy();
       state.player = null;
     }
+    playPending = false;   // 复位过渡锁，防止残留 true 卡死按键
     elements.video.src = '';
 
     setupMediaSession(filename);
@@ -1196,12 +1197,17 @@
     }).catch(() => {});
   } catch (e) {}
 
+  let playPending = false;   // play() 未落地前忽略重复触发（防加载过渡期热键不灵敏/连按乱切）
   function togglePlay() {
+    if (playPending) return;
     if (elements.video.paused) {
+      playPending = true;
       elements.video.play().then(() => {
+        playPending = false;
         state.isPlaying = true;
         updatePlayButton();
       }).catch(() => {
+        playPending = false;
         state.isPlaying = false;
         updatePlayButton();
         showPlayHint();
@@ -1346,6 +1352,7 @@
       state.player.destroy();
       state.player = null;
     }
+    playPending = false;   // 复位过渡锁，防止残留 true 卡死按键
     elements.video.src = '';
     elements.video.style.display = 'none';
     elements.placeholder.style.display = 'flex';
