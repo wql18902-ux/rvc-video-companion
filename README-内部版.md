@@ -1,12 +1,12 @@
 # RVC 视频伴侣（内部版）安装说明
 
-> 版本：v3.2.2 · 适用：macOS 12+（Apple Silicon / Intel）· 打包版免装 Python / ffmpeg
+> 版本：v3.2.3 · 适用：macOS 12+（Apple Silicon / Intel）· 打包版免装 Python / ffmpeg
 > 源码版（本仓库直接跑）额外需：Python 3.10+、ffmpeg/ffprobe（brew install ffmpeg）、pynput（全局热键，`python3 -m pip install pynput`；缺失时仅热键失效，服务器其余功能正常）
 
 > 本文面向**维护者/管理员**。终端用户请看 [README.md](README.md)。
 
-一个把视频播放器嵌进阅读页面的 Chrome 扩展：**左边看文章，右边看视频**，支持
-MKV/MOV 实时转码播放、无框模式、倍速（0.25×–3×）、键盘 A/S/D 控制。
+一个把媒体播放器嵌进阅读页面的 Chrome 扩展：**左边看文章，右边看视频/听音频**，支持
+MKV/MOV 实时转码播放、MP3 等音频原生播放、无框模式、倍速（0.25×–3×）、键盘 A/S/D 控制。
 
 内部版由两个组件组成：**本地服务器 .app**（转码引擎）+ **Chrome 扩展**（播放器界面，以「加载已解压」方式安装）。
 
@@ -21,7 +21,7 @@ MKV/MOV 实时转码播放、无框模式、倍速（0.25×–3×）、键盘 A/
 打开「终端」app，执行（路径按实际解压位置调整）：
 
 ```bash
-xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
+xattr -cr ~/Downloads/RVC-Video-Companion/RVC-Video-Companion.app
 ```
 
 ### 第 1 步：启动本地服务器
@@ -50,7 +50,7 @@ xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
 
 1. 打开 `https://aim-read.top`（Reader 英语阅读助手）
 2. 点浏览器右上角扩展栏里的 **RVC 视频伴侣图标**
-3. 播放器出现在页面右侧，点"加载视频"选择 ~/Downloads 里的视频即可
+3. 播放器出现在页面右侧，点"加载视频"选择 ~/Downloads 里的视频或音频文件即可
 
 > 之后每次使用：先双击 .app 启服务器，再打开 aim-read.top 点图标。
 
@@ -97,12 +97,12 @@ macOS 对未公证 app 的正常提示。右键点它 → 打开 → 仍要打�
 ## 给管理员的打包命令
 
 ```bash
-# 1. 打 .app（产物：stream-server/packaging/dist/RVC视频伴侣.app，约 57MB）
+# 1. 打 .app（产物：stream-server/packaging/dist/RVC-Video-Companion.app，约 57MB）
 #    版本号自动从 reader-video-companion/manifest.json 注入 Info.plist
 bash stream-server/packaging/build.sh
 
-# 2. 打分发包（产物：packaging/dist/RVC视频伴侣.zip，约 25MB，含 .app + 扩展 + 安装说明）
-#    安装说明版本号自动注入，已删除 .command（统一用终端 xattr 一行清隔离）
+# 2. 打分发包（产物：packaging/dist/RVC-Video-Companion.zip，约 25MB，含 .app + 扩展 + 安装说明）
+#    安装说明版本号自动注入
 bash packaging/make-distro.sh
 
 # 3. [已弃用] 打 .crx（Chrome 117+ 限制侧载，不再作为分发主路径；仅供特殊场景参考）

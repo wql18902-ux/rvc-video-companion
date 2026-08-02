@@ -1,16 +1,17 @@
 # RVC 视频伴侣
 
-> 专为 [aim-read.top](https://aim-read.top) 双语阅读站设计的本地视频播放器 Chrome 扩展。
+> 专为 [aim-read.top](https://aim-read.top) 双语阅读站设计的本地媒体播放器 Chrome 扩展（v3.2.3）。
 
-在阅读站页面右侧嵌入浮窗播放器，支持 MKV/MOV/AVI/FLV 等浏览器原生不支持的格式——通过本地 ffmpeg 服务器实时转码为 MPEG-TS 流式播放，**无文件大小限制**。
+在阅读站页面右侧嵌入浮窗播放器，支持 **视频 + 音频**：MKV/MOV/AVI/FLV 等浏览器原生不支持的视频格式通过本地 ffmpeg 服务器实时转码为 MPEG-TS 流式播放，**无文件大小限制**；MP3/M4A/WAV 等音频格式原生直出、零转码。
 
 ## 特性
 
 - **实时转码**：MKV/MOV/AVI/FLV 自动转 MPEG-TS 流，边转边播无需等待整文件
+- **音频播放**：MP3/M4A/AAC/WAV/FLAC/OGG 原生直出（不经 ffmpeg），倍速/进度/热键全支持
 - **无大小限制**：基于本地 ffmpeg，突破浏览器 WASM 内存限制
-- **浮动浮窗**：sticky 定位贴在阅读内容旁，支持拖拽 / 缩放 / 无框模式
-- **键盘控制**：S 播放/暂停、A 后退1秒、D 前进1秒（支持全局热键）
-- **目录浏览**：点「浏览」选本地目录，列出所有视频文件
+- **浮动图层**：fixed 图层悬浮在页面上方、不挤压文字，支持拖拽 / 缩放 / 无框模式
+- **键盘控制**：S 播放/暂停、A 后退1秒、D 前进1秒（页面内 + 全局热键）
+- **目录浏览**：点「浏览」选本地目录，列出所有媒体文件
 - **纯本地**：服务器只监听 127.0.0.1，不联网、不上传任何数据
 
 ## 截图
@@ -33,10 +34,10 @@
 2. 解压
 3. 打开「终端」app（Spotlight 搜 Terminal），执行：
    ```bash
-   xattr -cr ~/Downloads/RVC视频伴侣/RVC视频伴侣.app
+   xattr -cr ~/Downloads/RVC-Video-Companion/RVC-Video-Companion.app
    ```
    （路径根据你实际解压位置调整。这一步清除 macOS 隔离标记，跳过验证弹窗，只需做一次；不做也行，双击提示「无法验证开发者」时右键点它 → 打开 → 仍要打开即可）
-4. 双击「RVC视频伴侣.app」启动服务器
+4. 双击「RVC-Video-Companion.app」启动服务器
 5. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选解压出的 `reader-video-companion` 文件夹
 6. 访问 [aim-read.top](https://aim-read.top)，点扩展图标唤出播放器
 
@@ -50,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/wql18902-ux/rvc-video-companion/mai
 
 装完后帮我加载 Chrome 扩展：
 1. 打开 chrome://extensions → 开启「开发者模式」
-2. 点「加载已解压的扩展程序」→ 选 ~/Applications/RVC视频伴侣/reader-video-companion
+2. 点「加载已解压的扩展程序」→ 选 ~/Applications/RVC-Video-Companion/reader-video-companion
 3. 打开 https://aim-read.top 点扩展图标验证能用
 
 任何一步失败就停下来告诉我具体错误。
@@ -101,15 +102,16 @@ env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 |------|------|-----------|
 | 输入监控 | 全局热键 S/A/D | 仅全局热键失效，其余功能正常 |
 
-> 选目录走 macOS 原生「选取文件夹」对话框：先 `open -a Finder --hide` 激活（LaunchServices，无 TCC 自动化权限依赖），再纯 Standard Additions `choose folder` 弹出。**不需要自动化权限**。
+> 选目录走 macOS 原生「选取文件夹」对话框（纯 AppleScript `choose folder`，无需 Finder 激活、无需自动化权限）。
 > 每次更新 .app 后，输入监控权限会失效（系统按签名记账），需重新勾选。
 
-## 支持的视频格式
+## 支持的媒体格式
 
-| 格式 | 处理方式 |
-|------|----------|
-| MP4/M4V/WebM | 浏览器直接播放 |
-| MKV/MOV/AVI/FLV | ffmpeg 实时转 MPEG-TS 流 |
+| 类型 | 格式 | 处理方式 |
+|------|------|----------|
+| 视频 | MP4/M4V/WebM | 浏览器直接播放 |
+| 视频 | MKV/MOV/AVI/FLV | ffmpeg 实时转 MPEG-TS 流 |
+| 音频 | MP3/M4A/AAC/WAV/FLAC/OGG | 浏览器原生播放（零转码） |
 
 ## 隐私
 
@@ -150,8 +152,8 @@ env -u PYTHONHOME -u PYTHONPATH python3 tests/acceptance.py
 │   └── install-source.sh     # 一键安装（源码版）
 ├── tests/                    # 测试脚本
 │   ├── acceptance.py         # 端到端验收（sha256 冻结）
-│   ├── test_server_api.py    # L1 单测（29 用例）
-│   ├── e2e_extra.py          # L2 真实进程 E2E（5 用例）
+│   ├── test_server_api.py    # L1 单测（37 用例）
+│   ├── e2e_extra.py          # L2 真实进程 E2E（8 用例）
 │   └── fixtures/             # 测试样本
 ├── scripts/                  # 检查脚本
 │   ├── check.sh              # 统一检查（静态 + 验收）

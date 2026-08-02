@@ -52,7 +52,7 @@ macOS 12+ (Apple Silicon / Intel)
 
 == 包内容 ==
 
-  RVC-Video-Companion.app    本地视频服务器（含 ffmpeg，后台运行）
+  RVC-Video-Companion.app    本地媒体服务器（含 ffmpeg，后台运行）
   reader-video-companion/    Chrome 扩展（MV3，无需编译）
   安装说明.txt               本文件
 
@@ -119,7 +119,8 @@ macOS 12+ (Apple Silicon / Intel)
   A: 确认 .app 在运行。按钮灰色 = 服务器未连接，等几秒自动亮起。
 
   Q: 支持什么格式？
-  A: MP4/M4V/WebM 直接播放；MKV/MOV/AVI/FLV 自动实时转码，大小不限。
+  A: 视频 MP4/M4V/WebM 直接播放；MKV/MOV/AVI/FLV 自动实时转码，大小不限。
+     音频 MP3/M4A/AAC/WAV/FLAC/OGG 原生播放（零转码）。
 
   Q: 想用源码版（不用 .app）？
   A: 从 GitHub 下载源码，终端跑：
